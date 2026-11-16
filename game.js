@@ -13,6 +13,8 @@ const BEND_R = 300; // radio de curvatura: ángulo a altura y = s·y/R² (torres
 const EASY_H = 4; // primeras horas: sin temblores y grúa lenta
 const ROPE_Y = 196; // riel de la grúa (bajo el HUD y los mensajes)
 const HANG = 150; // altura del piso colgando sobre el tope
+const RISK_M = 0.4; // margen Jenga bajo el cual se avisa (tinte rojo + vibración + crujido)
+const RISK_COL = 0xff4a1c;
 
 // DO NOT replace existing keys — they match the physical arcade cabinet wiring.
 // To add local testing shortcuts, append extra keys to any array.
@@ -112,6 +114,7 @@ const TXT = {
   over: ['¡COLAPSÓ EL MVP!', 'EL MVP SE FUE A NEGRO', 'PIVOTEANDO A CONSULTORA...'],
   nocafe: ['¡SIN CAFÉ!', 'SE ACABÓ EL CAFÉ... Y LAS GANAS'],
   demo: '¡LLEGÓ AL DEMO DAY!',
+  warn: '¡CRUJE LA TORRE!\nUSA REFACTOR',
   // Eventos (temblores): [titular, subtítulo estilo Slack]
   ev: [
     ['MERGE CONFLICT', '#dev — "¿quién pusheó directo a main?"'],
@@ -119,7 +122,7 @@ const TXT = {
     ['WIFI CAÍDA', '#random — "¿alguien comparte datos?"'],
     ['PASÓ EL MENTOR', '#general — el mentor: "¿y si lo hacen B2B?"'],
     ['¡PIVOTEEN!', '#anuncios — "ahora es una app de citas para mascotas"'],
-    ['SE ACABÓ EL CAFÉ', '#random — "quedan puros sobres de té"'],
+    ['SE ACABARON LAS SOPAIPILLAS', '#random — "quedan puros sobres de té"'],
     ['NPM INSTALL', '#dev — "lleva 40 minutos... y sigue"'],
     ['DEPLOY A LAS 4AM', '#dev — "un deploy chiquitito nomás"'],
     ['CORTE DE LUZ', '#general — "¿alguien guardó?"'],
@@ -166,6 +169,12 @@ const CTL = { held: Object.create(null), pressed: Object.create(null) };
 const LAST = {}; // último texto mostrado por categoría (para no repetir)
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// mezcla lineal de dos colores 0xRRGGBB
+const mix = (a, b, t) => {
+  let r = 0;
+  for (const s of [16, 8, 0]) r |= Math.round(((a >> s) & 255) * (1 - t) + ((b >> s) & 255) * t) << s;
+  return r;
+};
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = (a) => a[(Math.random() * a.length) | 0];
 const hour = () => S.el / HOUR_MS;
@@ -213,7 +222,9 @@ function create() {
   sc.grp = sc.add.container(0, 0);
   sc.hg = sc.add.graphics();
   sc.clock = txt(W / 2, 8, '', 18).setOrigin(0.5, 0);
-  sc.tick = txt(W / 2, H - 22, '', 14, '#a8c700').setOrigin(0.5);
+  // comentario de ambiente: banda con fondo semitransparente, encima de la torre
+  sc.tickBg = sc.add.rectangle(W / 2, H - 22, 10, 26, C.bg, 0.85).setStrokeStyle(1, C.lime3).setAlpha(0);
+  sc.tick = txt(W / 2, H - 22, '', 14, '#e1ff00').setOrigin(0.5);
   sc.big = txt(W / 2, H / 2, '', 22).setOrigin(0.5).setLineSpacing(8);
   // pantalla de fin: filas fijas
   sc.go = sc.add.container(0, 0).setVisible(false);
@@ -246,6 +257,7 @@ function clearAll() {
   sc.go.setVisible(false);
   sc.clock.setText('');
   sc.tick.setText('');
+  sc.tickBg.setAlpha(0);
   sc.big.setText('');
 }
 
@@ -300,7 +312,8 @@ function mkPlayer(i, n) {
     floors: [], fall: [], cur: null, next: 0,
     s: 0, v: 0, com: 0, cam: 0, ph: Math.random() * 6, nudge: 0,
     lives: 3, score: 0, combo: 0, perf: 0, maxH: 0, why: '', dead: false, rf: 0,
-    qm: 0, qu: 0, qp: 0, shake: 0,
+    qm: 0, qu: 0, qp: 0, shake: 0, risk: 0, ck: 0,
+    bag: [], cbag: [], creeps: 0,
   };
   const x0 = p.cx - p.vw / 2;
   // zonas fijas por viewport: HUD (y 34-56) · eventos (66-130) · mensajes (140-190) · riel grúa (196)
@@ -359,6 +372,8 @@ function chain(p) {
 }
 
 // Regla Jenga: el centro de masa de los pisos i..tope debe caer sobre el piso i-1.
+// También calcula el riesgo (f.rk 0..1) para avisar antes del derrumbe:
+// cuando el margen de una unión baja de RISK_M, ese piso y los de arriba se tiñen y vibran.
 function jenga(p) {
   const F = p.floors;
   let sw = 0;
@@ -371,11 +386,17 @@ function jenga(p) {
     const b = F[i - 1];
     const sup = b.cx + (b.h / 2) * Math.sin(b.a);
     const d = sx / sw - sup;
-    if (Math.abs(d) > (b.w / 2) * Math.cos(b.a) + 4 * p.k) {
+    const lim = (b.w / 2) * Math.cos(b.a) + 4 * p.k;
+    F[i].jr = clamp((RISK_M - (1 - Math.abs(d) / lim)) / RISK_M, 0, 1);
+    if (Math.abs(d) > lim) {
       fail = i; // nos quedamos con la falla más baja
       dir = Math.sign(d);
     }
   }
+  // el riesgo de una unión se propaga a todos los pisos que están encima
+  let rk = 0;
+  for (const f of F) f.rk = rk = Math.max(rk, f.jr || 0);
+  p.risk = rk;
   if (fail) topple(p, fail, dir);
 }
 
@@ -406,11 +427,30 @@ function toFall(p, f, dir, x, y, a) {
 }
 const floorFall = (p, f, dir) => toFall(p, f, dir, f.cx, f.cy - f.h / 2, f.a);
 
+// Bolsa barajada: no repite una feature hasta agotar la lista.
+function fromBag(p, key, src) {
+  if (!p[key].length) {
+    const b = src.slice();
+    for (let i = b.length; i > 1; i--) {
+      const j = (Math.random() * i) | 0;
+      [b[i - 1], b[j]] = [b[j], b[i - 1]];
+    }
+    // evita repetir en el borde entre una bolsa y la siguiente
+    if (b[b.length - 1] === p[key + 'L']) b.unshift(b.pop());
+    p[key] = b;
+  }
+  return (p[key + 'L'] = p[key].pop());
+}
+
+// Probabilidad de scope creep: 0 antes de EASY_H, sube a ~40% a la hora 10 y ~50% al final.
+const creepP = (h) => (h < EASY_H ? 0 : h < 10 ? 0.15 + ((h - EASY_H) / 6) * 0.25 : Math.min(0.5, 0.4 + (h - 10) * 0.005));
+
 function spawnCur(p) {
   const h = hour();
-  const creep = clamp((h - 8) / 20, 0, 0.7);
-  const isCreep = Math.random() < creep;
-  const d = isCreep ? pick(CREEP) : pick(FEATS);
+  // la primera feature absurda llega apenas termina el inicio amable
+  const isCreep = h >= EASY_H && (!p.creeps || Math.random() < creepP(h));
+  if (isCreep) p.creeps++;
+  const d = isCreep ? fromBag(p, 'cbag', CREEP) : fromBag(p, 'bag', FEATS);
   const c = {
     name: d[0], w: d[1] * p.k, h: FH * p.k, wt: d[2],
     col: isCreep ? C.white : pick(FLOOR_COLS),
@@ -502,6 +542,16 @@ function upd(p, dt) {
   if (Math.abs(p.tx - p.floors[p.floors.length - 1].X) > LIM * p.k) return die(p, say(TXT.over, 'over'));
   jenga(p);
   if (p.dead) return;
+
+  // crujido: más frecuente cuanto mayor el riesgo
+  if (p.risk > 0.15 && S.el >= p.ck) {
+    p.ck = S.el + 900 - p.risk * 650;
+    tone(rnd(70, 110), 0.12, 'sawtooth', 0.04 + p.risk * 0.08, rnd(40, 60));
+  }
+  if (p.risk > 0.6 && !p.warned) {
+    p.warned = true;
+    msg(p, TXT.warn, '#ff8a5c');
+  } else if (p.risk < 0.2) p.warned = false;
 
   const top = topH(p);
   const tf = p.floors[p.floors.length - 1];
@@ -607,9 +657,10 @@ function update(time, delta) {
       const am = TXT.amb[S.ai];
       if (am && h >= am[0]) {
         S.ai++;
-        sc.tweens.killTweensOf(sc.tick);
-        sc.tick.setText(am[1]).setAlpha(1);
-        sc.tweens.add({ targets: sc.tick, alpha: 0, delay: 4000, duration: 600 });
+        sc.tweens.killTweensOf([sc.tick, sc.tickBg]);
+        sc.tick.setText('> ' + am[1]).setAlpha(1);
+        sc.tickBg.setSize(sc.tick.width + 24, 26).setAlpha(1);
+        sc.tweens.add({ targets: [sc.tick, sc.tickBg], alpha: 0, delay: 4000, duration: 600 });
       }
     }
     for (const p of S.P) upd(p, dt);
@@ -689,9 +740,11 @@ function drawP(p, g, bg) {
 
   // torre (posiciones calculadas en chain)
   for (const f of p.floors) {
-    const x = ox + f.cx;
+    // riesgo Jenga: tinte hacia rojo + vibración proporcional
+    const rk = f.rk || 0;
+    const x = ox + f.cx + (Math.random() - 0.5) * rk * 6;
     const y = SY(f.cy);
-    slab(g, x, y, f.w, f.h, f.a, f.col);
+    slab(g, x, y, f.w, f.h, f.a, rk > 0.02 ? mix(f.col, RISK_COL, 0.2 + rk * 0.8) : f.col);
     f.t.setPosition(x, y).setRotation(f.a);
   }
 
