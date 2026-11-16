@@ -23,8 +23,11 @@ const SWAY_J = 0.55; // cuánto del balanceo cuenta para la regla Jenga (0 = sol
 const GRACE_MS = 2500; // tras un derrumbe, sin derrumbes nuevos por este tiempo
 const BEND_GROW = 0.8; // el radio de curvatura crece con la altura: R = max(BEND_R, alto·BEND_GROW)
 const DAMP = 1.5; // amortiguación del balanceo (más = menos resonancia)
-const QUAKE_H = 0.04; // el temblor pega más fuerte cuanto más alta la torre (por piso)
-const QUAKE = (h) => 40 + h * 3 + Math.max(0, h - 24) * 4; // fuerza de los temblores (sube más en la recta final)
+const QUAKE_H = 0.04; // el temblor pega más fuerte cuanto más alta la torre (por piso)...
+const QUAKE_HCAP = 30; // ...hasta este número de pisos (sin techo, las torres de 50+ eran imposibles)
+const QUAKE = (h) => 40 + h * 3 + Math.max(0, h - 24) * 5; // fuerza de los temblores (sube más en la recta final)
+const GLOBAL_WARN = 0.6; // fracción de la inclinación máxima desde la que se avisa (tinte + crujido)
+const GLOBAL_CUT = 0.6; // colapso global: se cae todo lo que está sobre este % de la altura
 const RIVAL_Q = 55; // temblor que manda un perfecto al rival (2P)
 const EFX_MS = 6000; // duración de los efectos de evento sobre la grúa
 const PW_CAFE = 0.08; // prob. de power-up CAFÉ (si te falta café)
@@ -829,7 +832,7 @@ function upd(p, dt) {
   const w0 = Math.sqrt(ks);
   let F = 0;
   if (S.el < p.qu) {
-    F = p.qm * (1 + n * QUAKE_H) * Math.sin((S.el / 1000) * w0 + p.qp); // torres altas se mecen más
+    F = p.qm * (1 + Math.min(n, QUAKE_HCAP) * QUAKE_H) * Math.sin((S.el / 1000) * w0 + p.qp); // torres altas se mecen más
     p.shake = Math.max(p.shake, p.qm / 25);
   }
   const a = -ks * (p.s - 2.4 * p.com) - DAMP * p.v + F;
@@ -837,10 +840,25 @@ function upd(p, dt) {
   p.s += p.v * dt;
 
   chain(p);
-  // inclinación global: desplazamiento real de la punta vs. su posición sin balanceo
-  if (Math.abs(p.tx - p.floors[p.floors.length - 1].X) > LIM * p.k) return die(p, TXT.over);
   jenga(p);
   if (p.dead) return;
+  // inclinación global: desplazamiento real de la punta vs. su posición sin balanceo.
+  // Cerca del límite tiñe la parte alta y avisa; al pasarlo se quiebra la parte alta
+  // (-1 café, como un derrumbe). Solo con el último café es game over.
+  const F2 = p.floors;
+  const gi = Math.abs(p.tx - F2[F2.length - 1].X) / (LIM * p.k);
+  const cut = Math.max(1, Math.floor(F2.length * GLOBAL_CUT));
+  const gr = clamp((gi - GLOBAL_WARN) / (1 - GLOBAL_WARN), 0, 1);
+  if (gr > 0) {
+    for (let i = cut; i < F2.length; i++) F2[i].rk = Math.max(F2[i].rk || 0, gr);
+    p.risk = Math.max(p.risk, gr);
+  }
+  if (gi > 1 && S.el >= (p.grace || 0)) {
+    if (p.lives <= 1) return die(p, TXT.over);
+    topple(p, cut, Math.sign(p.s) || 1);
+    msg(p, TXT.over + '\n-1 CAFÉ', '#f7ffd8', 1);
+    if (p.dead) return;
+  }
 
   // crujido: más frecuente cuanto mayor el riesgo
   if (p.risk > RISK_SHOW + 0.15 && S.el >= p.ck) {
