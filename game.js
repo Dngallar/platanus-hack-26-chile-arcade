@@ -117,6 +117,7 @@ const TXT = {
   over: '¡COLAPSÓ EL MVP!',
   nocafe: '¡SIN CAFÉ!',
   elim: 'ELIMINADO',
+  away: '¡SE QUEDÓ DORMIDO!',
   wait: 'esperando al rival...',
   demo: '¡LLEGÓ AL DEMO DAY!',
   warn: '¡CRUJE LA TORRE!\nUSA REFACTOR',
@@ -918,7 +919,13 @@ function update(time, delta) {
     for (const p of S.P) upd(p, dt);
     if (S.ph === 'play') {
       // partida abandonada: vuelve al título sin pedir iniciales
-      if (Date.now() - Math.max(LI.any, S.t0) > ABANDON_MS) return toTitle();
+      // partida abandonada: si casi no se jugó (≤2 pisos) vuelve al título;
+      // si hubo progreso, termina normal (y si califica, guarda como '???')
+      if (Date.now() - Math.max(LI.any, S.t0) > ABANDON_MS) {
+        if (S.P.every((p) => p.maxH <= 2)) return toTitle();
+        for (const p of S.P) if (!p.dead) Object.assign(p, { dead: true, why: TXT.away });
+        return endGame(false);
+      }
       if (S.P.every((p) => p.dead)) endGame(false);
       else if (hour() >= END_H) endGame(true);
     } else if (S.ph === 'name') {
@@ -1117,7 +1124,7 @@ function cleanTop(v) {
   return v
     .filter(
       (e) =>
-        e && typeof e === 'object' && typeof e.n === 'string' && /^[A-Z0-9.\-]{1,3}$/.test(e.n) &&
+        e && typeof e === 'object' && typeof e.n === 'string' && /^[A-Z0-9.\-?]{1,3}$/.test(e.n) &&
         Number.isFinite(e.s) && e.s >= 0 && e.s < 1e9,
     )
     .map((e) => ({
@@ -1167,12 +1174,13 @@ function topLines(mark) {
 function startNames(qs, time) {
   S.ph = 'name';
   S.nameEnd = time + 30000; // si nadie confirma, se guarda solo
+  S.t1 = Date.now();
   sc.goStart.setText('');
   sc.goIdle.setText('');
   sc.goTop.setText('');
   S.ent = qs.map((p) => {
     const x = S.n > 1 ? 200 + 400 * p.i : W / 2;
-    const e = { p, l: [0, 0, 0], k: 0, done: false, rt: 0 };
+    const e = { p, l: [0, 0, 0], k: 0, done: false, rt: 0, touched: false };
     e.lab = txt(x, 280, (S.n > 1 ? p.id + ' · ' : '') + TXT.rec, 20).setOrigin(0.5);
     e.ch = [0, 1, 2].map((i) => txt(x + (i - 1) * 56, 350, 'A', 52, '#f7ffd8').setOrigin(0.5));
     e.hint = txt(x, 425, TXT.hint, 13, '#a8c700').setOrigin(0.5).setLineSpacing(4);
@@ -1185,6 +1193,7 @@ function nameFrame(time) {
   for (const e of S.ent) {
     const id = e.p.id;
     if (e.done || time < S.lock) continue;
+    if (LI[id] > S.t1) e.touched = true; // tocó algo durante el ingreso
     // ↑↓ cambia la letra (con auto-repetición al mantener)
     let dy = 0;
     if (prs(id + '_U')) dy = 1;
@@ -1208,7 +1217,15 @@ function nameFrame(time) {
     }
     if (prs(id === 'P1' ? 'START1' : 'START2')) e.done = true;
   }
-  if (time > S.nameEnd) for (const e of S.ent) e.done = true;
+  // se acabó el tiempo: quien nunca tocó nada queda como '???'
+  if (time > S.nameEnd) {
+    for (const e of S.ent) {
+      if (!e.done) {
+        e.done = true;
+        e.anon = !e.touched;
+      }
+    }
+  }
   const blink = Math.floor(time / 180) % 2;
   for (const e of S.ent) {
     e.ch.forEach((t, i) => {
@@ -1227,7 +1244,9 @@ function saveNames(time) {
   S.lock = time + 800;
   S.idle = time + 20000;
   const now = Date.now();
-  const add = S.ent.map((e, j) => ({ n: e.l.map((i) => CHARS[i]).join(''), s: e.p.score, h: e.p.maxH, d: now + j }));
+  const add = S.ent.map((e, j) => ({
+    n: e.anon ? '???' : e.l.map((i) => CHARS[i]).join(''), s: e.p.score, h: e.p.maxH, d: now + j,
+  }));
   for (const e of S.ent) for (const o of [e.lab, ...e.ch, e.hint]) o.destroy();
   S.ent = [];
   S.mark = add.map((a) => a.d);
