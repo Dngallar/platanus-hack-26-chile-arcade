@@ -13,7 +13,26 @@ const BEND_R = 300; // radio de curvatura: ángulo a altura y = s·y/R² (torres
 const EASY_H = 4; // primeras horas: sin temblores y grúa lenta
 const ROPE_Y = 196; // riel de la grúa (bajo el HUD y los mensajes)
 const HANG = 150; // altura del piso colgando sobre el tope
-const RISK_M = 0.4; // margen Jenga bajo el cual se avisa (tinte rojo + vibración + crujido)
+const RISK_M = 0.3; // margen Jenga bajo el cual se avisa (tinte rojo + vibración + crujido)
+const RISK_SHOW = 0.15; // riesgo mínimo para teñir/crujir (evita torre siempre naranja)
+
+// ===== BALANCE (F5) =====
+const PERF_PX = 9; // ventana de perfecto (px desde el centro)
+const CASI_PX = 18; // ventana de "casi perfecto"
+const SWAY_J = 0.55; // cuánto del balanceo cuenta para la regla Jenga (0 = solo geometría)
+const GRACE_MS = 2500; // tras un derrumbe, sin derrumbes nuevos por este tiempo
+const BEND_GROW = 0.8; // el radio de curvatura crece con la altura: R = max(BEND_R, alto·BEND_GROW)
+const DAMP = 1.5; // amortiguación del balanceo (más = menos resonancia)
+const QUAKE_H = 0.04; // el temblor pega más fuerte cuanto más alta la torre (por piso)
+const QUAKE = (h) => 40 + h * 3 + Math.max(0, h - 24) * 4; // fuerza de los temblores (sube más en la recta final)
+const RIVAL_Q = 55; // temblor que manda un perfecto al rival (2P)
+const EFX_MS = 6000; // duración de los efectos de evento sobre la grúa
+const PW_CAFE = 0.08; // prob. de power-up CAFÉ (si te falta café)
+const PW_PAIR = 0.05; // prob. de power-up PAIR PROGRAMMING
+const DD_MS = 12000; // duración del Demo Day
+const DD_Q = 80; // temblor base de los jueces
+const DD_JOLT = 80; // sacudón extra cada ~1.5 s
+const DD_FLOOR = 25; // bonus por piso en pie al sobrevivir
 const RISK_COL = 0xff4a1c;
 const MIN_FONT = 11; // tamaño mínimo del nombre de un piso
 const TX = 545; // columna de texto del título (la torre demo va a la izquierda)
@@ -119,7 +138,7 @@ const TXT = {
   elim: 'ELIMINADO',
   away: '¡SE QUEDÓ DORMIDO!',
   wait: 'esperando al rival...',
-  demo: '¡LLEGÓ AL DEMO DAY!',
+  demo: '¡SOBREVIVIÓ AL DEMO DAY!',
   warn: '¡CRUJE LA TORRE!\nUSA REFACTOR',
   // Pantalla de título
   sub: 'PLATANUS HACK 26 · SANTIAGO',
@@ -154,18 +173,28 @@ const TXT = {
     '2 JUGADORES\n\nPANTALLA DIVIDIDA\nCADA PISO PERFECTO LE MANDA\nUN TEMBLOR A TU RIVAL\n\nPRESIONA START2',
   ],
   // Eventos (temblores): [titular, subtítulo estilo Slack]
+  // Efectos: narrow = el próximo piso llega a medias · fast/slow = grúa rápida/lenta
+  // blind = la grúa parpadea · pivot = la grúa salta al otro lado · creep = próximo piso absurdo
+  // big = temblor más fuerte · '' = solo temblor
   ev: [
-    ['MERGE CONFLICT', '#dev — "¿quién pusheó directo a main?"'],
-    ['SE CAYÓ LA API', '#general — "¿alguien tiene otra API key?"'],
-    ['WIFI CAÍDA', '#random — "¿alguien comparte datos?"'],
-    ['PASÓ EL MENTOR', '#general — el mentor: "¿y si lo hacen B2B?"'],
-    ['¡PIVOTEEN!', '#anuncios — "ahora es una app de citas para mascotas"'],
-    ['SE ACABARON LAS SOPAIPILLAS', '#random — "quedan puros sobres de té"'],
-    ['NPM INSTALL', '#dev — "lleva 40 minutos... y sigue"'],
-    ['DEPLOY A LAS 4AM', '#dev — "un deploy chiquitito nomás"'],
-    ['CORTE DE LUZ', '#general — "¿alguien guardó?"'],
-    ['TEMBLOR DE VERDAD', '#random — "tranqui, fue un 5,8 nomás"'],
+    ['MERGE CONFLICT', '#dev — "¿quién pusheó directo a main?"', 'narrow'],
+    ['SE CAYÓ LA API', '#general — "¿alguien tiene otra API key?"', 'fast'],
+    ['WIFI CAÍDA', '#random — "¿alguien comparte datos?"', 'blind'],
+    ['PASÓ EL MENTOR', '#general — el mentor: "¿y si lo hacen B2B?"', 'creep'],
+    ['¡PIVOTEEN!', '#anuncios — "ahora es una app de citas para mascotas"', 'pivot'],
+    ['SE ACABARON LAS SOPAIPILLAS', '#random — "quedan puros sobres de té"', ''],
+    ['NPM INSTALL', '#dev — "lleva 40 minutos... y sigue"', 'slow'],
+    ['DEPLOY A LAS 4AM', '#dev — "un deploy chiquitito nomás"', 'fast'],
+    ['CORTE DE LUZ', '#general — "¿alguien guardó?"', 'blind'],
+    ['TEMBLOR DE VERDAD', '#random — "tranqui, fue un 5,8 nomás"', 'big'],
   ],
+  half: ' (A MEDIAS)',
+  // Power-ups: [nombre, ancho, peso, mensaje al aterrizar]
+  cafe: ['CAFÉ DE GRANO', 110, 1, '¡ESPRESSO DOBLE!\n+1 CAFÉ'],
+  pair: ['PAIR PROGRAMMING', 200, 1.1, '¡PAIR PROGRAMMING!\nREFACTOR LISTO'],
+  // Final
+  dd: ['DEMO DAY', 'los jueces prueban tu MVP: ¡aguanta 12 segundos!'],
+  ddClock: 'DEMO DAY',
   // Temblor enviado por el rival (2P)
   rival: [
     ['TU RIVAL SHIPPEÓ', '#general — "¿vieron el demo del equipo de al lado?"'],
@@ -388,12 +417,33 @@ function countdown(time) {
   }
 }
 
+// DEMO DAY: a las 36 h no hay más pisos; los jueces sacuden la torre DD_MS.
+// Quien siga en pie al final gana el bonus.
+function demoDay() {
+  if (!S.dd) {
+    S.dd = S.el;
+    S.dj = 0;
+    for (const p of S.P) {
+      if (p.dead) continue;
+      p.qm = DD_Q;
+      p.qu = S.el + DD_MS;
+      card(p, TXT.dd, DD_MS - 400);
+    }
+  }
+  // sacudones de los jueces
+  if (S.el >= S.dj) {
+    S.dj = S.el + rnd(1200, 1800);
+    for (const p of S.P) if (!p.dead) p.v += rnd(-1, 1) * DD_JOLT;
+  }
+  if (S.el - S.dd >= DD_MS) endGame(true);
+}
+
 // temblores de hackathon (juego y attract)
 function events() {
   const h = hour();
-  if (h >= EASY_H && S.el >= S.ne) {
+  if (h >= EASY_H && S.el >= S.ne && !S.dd) {
     const ev = say(TXT.ev, 'ev');
-    for (const p of S.P) quake(p, 45 + h * 4, 2600, ev);
+    for (const p of S.P) quake(p, QUAKE(h) * (ev[2] === 'big' ? 1.6 : 1), 2600, ev);
     S.ne = S.el + rnd(7000, 12000) - h * 80;
   }
 }
@@ -423,8 +473,9 @@ function endGame(survived) {
   S.idle = sc.time.now + 20000;
   for (const p of S.P) {
     if (survived && !p.dead) {
-      p.score += 1000;
-      p.why = TXT.demo + ' +1000';
+      const b = 1000 + (p.floors.length - 1) * DD_FLOOR;
+      p.score += b;
+      p.why = TXT.demo + ' +' + b;
     }
     // ocultar mensajes en juego para que no se superpongan
     for (const t of [p.msgT, p.evT, p.subT]) {
@@ -515,7 +566,8 @@ const topH = (p) => {
 // La única rotación es la curvatura global: ángulo(y) = s·y/R². Entre pisos
 // consecutivos la diferencia es ~1°, así cada piso queda plano sobre el de abajo.
 function chain(p) {
-  const th = p.s / (BEND_R * BEND_R);
+  const R = Math.max(BEND_R, topH(p) * BEND_GROW);
+  const th = p.s / (R * R);
   let X = 0;
   let px = 0;
   let py = 0;
@@ -549,11 +601,11 @@ function jenga(p) {
   let dir = 0;
   for (let i = F.length - 1; i > 0; i--) {
     sw += F[i].wt;
-    sx += F[i].wt * F[i].cx;
+    sx += F[i].wt * jx(F[i]);
     const b = F[i - 1];
-    const sup = b.cx + (b.h / 2) * Math.sin(b.a);
+    const sup = jx(b);
     const d = sx / sw - sup;
-    const lim = (b.w / 2) * Math.cos(b.a) + 4 * p.k;
+    const lim = b.w / 2 + 4 * p.k;
     F[i].jr = clamp((RISK_M - (1 - Math.abs(d) / lim)) / RISK_M, 0, 1);
     if (Math.abs(d) > lim) {
       fail = i; // nos quedamos con la falla más baja
@@ -564,11 +616,15 @@ function jenga(p) {
   let rk = 0;
   for (const f of F) f.rk = rk = Math.max(rk, f.jr || 0);
   p.risk = rk;
-  if (fail) topple(p, fail, dir);
+  if (fail && S.el >= (p.grace || 0)) topple(p, fail, dir);
 }
+
+// x de un piso para la regla Jenga: geometría + una fracción (SWAY_J) del balanceo
+const jx = (f) => f.X + SWAY_J * (f.cx - f.X);
 
 // Todo lo que está sobre el piso i-1 se vuelca y cae.
 function topple(p, i, dir) {
+  p.grace = S.el + GRACE_MS;
   const n = p.floors.length - i;
   for (const f of p.floors.splice(i)) {
     burst(p, f.cx, f.cy, 5, [f.col, C.lime3], 220);
@@ -617,17 +673,28 @@ function fromBag(p, key, src) {
 // Probabilidad de scope creep: 0 antes de EASY_H, sube a ~40% a la hora 10 y ~50% al final.
 const creepP = (h) => (h < EASY_H ? 0 : h < 10 ? 0.15 + ((h - EASY_H) / 6) * 0.25 : Math.min(0.5, 0.4 + (h - 10) * 0.005));
 
+// efecto de evento activo (o '' si ya venció)
+const efx = (p) => (S.el < (p.efu || 0) ? p.efx : '');
+
 function spawnCur(p) {
   const h = hour();
-  // la primera feature absurda llega apenas termina el inicio amable
-  const isCreep = h >= EASY_H && (!p.creeps || Math.random() < creepP(h));
+  const e = efx(p);
+  if (e === 'narrow' || e === 'creep') p.efx = ''; // efectos de un solo piso
+  // power-ups (después del inicio amable)
+  const pw = h < EASY_H ? 0 : p.lives < 3 && Math.random() < PW_CAFE ? TXT.cafe : Math.random() < PW_PAIR ? TXT.pair : 0;
+  // la primera feature absurda llega apenas termina el inicio amable; el mentor fuerza una
+  const isCreep = !pw && h >= EASY_H && (!p.creeps || e === 'creep' || Math.random() < creepP(h));
   if (isCreep) p.creeps++;
-  const d = isCreep ? fromBag(p, 'cbag', CREEP) : fromBag(p, 'bag', FEATS);
+  const d = pw || (isCreep ? fromBag(p, 'cbag', CREEP) : fromBag(p, 'bag', FEATS));
   const c = {
-    name: d[0], w: d[1] * p.k, h: FH * p.k, wt: d[2],
-    col: isCreep ? C.white : pick(FLOOR_COLS),
+    name: d[0], w: d[1] * p.k, h: FH * p.k, wt: d[2], pw: pw && d[3],
+    col: pw ? 0xffd84d : isCreep ? C.white : pick(FLOOR_COLS),
     x: 0, y: topH(p) + HANG, vy: 0, st: 'hang', t0: Date.now(),
   };
+  if (e === 'narrow' && !pw) {
+    c.w *= 0.6; // merge conflict: llega a medias
+    c.name += TXT.half;
+  }
   c.t = floorText(c);
   p.cur = c;
 }
@@ -637,6 +704,20 @@ function quake(p, m, dur, ev) {
   p.qm = Math.max(S.el < p.qu ? p.qm : 0, m);
   p.qu = S.el + dur;
   p.qp = Math.random() * 6;
+  // efecto del evento sobre la grúa / el próximo piso
+  if (ev[2]) {
+    p.efx = ev[2];
+    p.efu = S.el + EFX_MS;
+    if (ev[2] === 'pivot') {
+      p.ph = Math.PI - p.ph + Math.PI; // la grúa salta al lado opuesto
+      p.nudge = -p.nudge;
+    }
+  }
+  card(p, ev, dur);
+}
+
+// tarjeta tipo notificación (titular + subtítulo) con alarma y flash
+function card(p, ev, dur) {
   for (const [t, s] of [[p.evT, '!! ' + ev[0] + ' !!'], [p.subT, ev[1]]]) {
     sc.tweens.killTweensOf(t);
     t.setText(s).setAlpha(1).setScale(1.2);
@@ -744,14 +825,14 @@ function upd(p, dt) {
     sx += f.wt * f.X;
   }
   p.com = sx / sw;
-  const ks = 9 / (1 + n * 0.05);
+  const ks = 9 / (1 + n * 0.03);
   const w0 = Math.sqrt(ks);
   let F = 0;
   if (S.el < p.qu) {
-    F = p.qm * Math.sin((S.el / 1000) * w0 + p.qp);
+    F = p.qm * (1 + n * QUAKE_H) * Math.sin((S.el / 1000) * w0 + p.qp); // torres altas se mecen más
     p.shake = Math.max(p.shake, p.qm / 25);
   }
-  const a = -ks * (p.s - 2.4 * p.com) - 1.1 * p.v + F;
+  const a = -ks * (p.s - 2.4 * p.com) - DAMP * p.v + F;
   p.v += a * dt;
   p.s += p.v * dt;
 
@@ -762,7 +843,7 @@ function upd(p, dt) {
   if (p.dead) return;
 
   // crujido: más frecuente cuanto mayor el riesgo
-  if (p.risk > 0.15 && S.el >= p.ck) {
+  if (p.risk > RISK_SHOW + 0.15 && S.el >= p.ck) {
     p.ck = S.el + 900 - p.risk * 650;
     SFX.creak(p.risk);
   }
@@ -778,14 +859,15 @@ function upd(p, dt) {
   p.cam += (Math.max(0, top - 170) - p.cam) * Math.min(1, dt * 4);
 
   // grúa y caída
-  if (!p.cur && S.el >= p.next) spawnCur(p);
+  if (!p.cur && S.el >= p.next && !S.dd) spawnCur(p);
   const c = p.cur;
   if (!c) return;
   if (c.st === 'hang') {
     // inicio amable: grúa lenta las primeras EASY_H horas, luego acelera
     const ez = Math.min(h / EASY_H, 1);
     const he = Math.max(0, h - EASY_H);
-    p.ph += dt * (0.9 + ez * 0.4 + he * 0.05);
+    const e = efx(p);
+    p.ph += dt * (0.9 + ez * 0.4 + he * 0.05) * (e === 'fast' ? 1.7 : e === 'slow' ? 0.5 : 1);
     c.x = tf.X + p.nudge + Math.sin(p.ph) * (45 + ez * 15 + he * 2.2) * p.k;
     c.y = top + HANG;
     // soltar: botón 1, o palanca ABAJO (solo flanco y sin izquierda/derecha)
@@ -821,7 +903,7 @@ function land(p, c, tf) {
     p.next = S.el + 450;
     return;
   }
-  const perf = Math.abs(dx) <= 5 * p.k;
+  const perf = Math.abs(dx) <= PERF_PX * p.k;
   const y0 = topH(p);
   p.floors.push({
     name: c.name, w: c.w, h: c.h, wt: c.wt, col: c.col, t: c.t,
@@ -829,6 +911,12 @@ function land(p, c, tf) {
   });
   // polvo en las esquinas + "golpe" de cámara
   const lx = perf ? p.tx : c.x;
+  if (c.pw) {
+    if (c.name === TXT.cafe[0]) p.lives = Math.min(3, p.lives + 1);
+    else p.rf = 0; // pair programming: refactor listo
+    SFX.mile();
+    burst(p, lx, y0 + c.h, 24, [0xffd84d, C.white], 260, true);
+  }
   for (const sx of [-1, 1]) burst(p, lx + (sx * c.w) / 2, y0, 5, [C.lime3, C.lime2], 110, true);
   p.kick = Math.max(p.kick, 3);
   p.v += dx * 0.8;
@@ -840,16 +928,18 @@ function land(p, c, tf) {
   pop(p, lx, y0 + c.h + 10, '+' + pts, perf ? TXT.perfCol[mult - 1] : '#f7ffd8');
   if (perf) {
     p.perf++;
-    msg(p, `${say(TXT.perf[mult - 1], 'perf')}\nx${mult}`, TXT.perfCol[mult - 1], 1);
+    msg(p, c.pw || `${say(TXT.perf[mult - 1], 'perf')}\nx${mult}`, c.pw ? '#ffd84d' : TXT.perfCol[mult - 1], 1);
     SFX.perf(p.combo);
     burst(p, lx, y0 + c.h, 10 + mult * 4, [C.lime, C.white, 0xffd84d], 200 + mult * 30, true);
     ring(p, lx, y0 + c.h / 2);
     flash(p, C.white, 0.2 + mult * 0.05);
     p.kick = 5;
-    if (S.n > 1) quake(S.P[1 - p.i], 70, 1800, say(TXT.rival, 'rival'));
+    // sabotaje 2P: no se acumula si el rival ya está temblando
+    const o = S.P[1 - p.i];
+    if (S.n > 1 && S.el >= o.qu) quake(o, RIVAL_Q, 1800, say(TXT.rival, 'rival'));
   } else {
-    const k = Math.abs(dx) <= 12 * p.k ? 'casi' : ov < 0.6 * c.w ? 'pelo' : 'normal';
-    msg(p, say(TXT[k], k), '#f7ffd8');
+    const k = Math.abs(dx) <= CASI_PX * p.k ? 'casi' : ov < 0.6 * c.w ? 'pelo' : 'normal';
+    msg(p, c.pw || say(TXT[k], k), c.pw ? '#ffd84d' : '#f7ffd8', !!c.pw);
     SFX.land();
   }
   // hito cada 10 pisos (la primera vez que se alcanza)
@@ -927,7 +1017,7 @@ function update(time, delta) {
         return endGame(false);
       }
       if (S.P.every((p) => p.dead)) endGame(false);
-      else if (hour() >= END_H) endGame(true);
+      else if (hour() >= END_H) demoDay();
     } else if (S.ph === 'name') {
       nameFrame(time);
     } else {
@@ -947,7 +1037,9 @@ function hud() {
   const h = Math.min(hour(), END_H);
   const hh = String(Math.floor(h)).padStart(2, '0');
   const mm = String(Math.floor((h % 1) * 60)).padStart(2, '0');
-  sc.clock.setText(`HORA ${hh}:${mm} / 36:00`);
+  sc.clock.setText(
+    S.dd ? `${TXT.ddClock} · ${Math.max(0, Math.ceil((DD_MS - S.el + S.dd) / 1000))}s` : `HORA ${hh}:${mm} / 36:00`,
+  );
   for (const p of S.P) {
     const l = Math.max(0, p.lives);
     const sp = S.n > 1 ? ' ' : '   ';
@@ -1021,15 +1113,17 @@ function drawP(p, g, bg) {
   for (const f of p.floors) {
     // riesgo Jenga: tinte hacia rojo + vibración proporcional
     const rk = f.rk || 0;
-    const x = ox + f.cx + (Math.random() - 0.5) * rk * 6;
+    const x = ox + f.cx + (rk > RISK_SHOW ? (Math.random() - 0.5) * rk * 6 : 0);
     const y = SY(f.cy);
     const q = f.sq || 0; // squash al aterrizar
-    slab(g, x, y + q * 3, f.w * (1 + 0.1 * q), f.h * (1 - 0.25 * q), f.a, rk > 0.02 ? mix(f.col, RISK_COL, 0.2 + rk * 0.8) : f.col, p.dead ? 0.35 : 1);
+    slab(g, x, y + q * 3, f.w * (1 + 0.1 * q), f.h * (1 - 0.25 * q), f.a, rk > RISK_SHOW ? mix(f.col, RISK_COL, 0.2 + ((rk - RISK_SHOW) / (1 - RISK_SHOW)) * 0.8) : f.col, p.dead ? 0.35 : 1);
     f.t.setPosition(x, y + q * 3).setRotation(f.a).setAlpha(p.dead ? 0.35 : 1).setScale(1 + 0.1 * q, 1 - 0.25 * q);
   }
 
   const c = p.cur;
-  if (c) {
+  // WiFi caída / corte de luz: la grúa y el piso colgando parpadean
+  const ca = efx(p) === 'blind' && c && c.st === 'hang' ? (Math.sin(S.el / 110) > 0.55 ? 1 : 0.06) : 1;
+  if (c && ca > 0.5) {
     const x = ox + c.x;
     const y = SY(c.y + c.h / 2);
     if (c.st === 'hang') {
@@ -1039,14 +1133,14 @@ function drawP(p, g, bg) {
       g.fillStyle(C.lime2, 1);
       g.fillRect(x - 8, ROPE_Y - 4, 16, 6);
     }
-    if (p.combo > 1) {
-      // racha de perfectos: el piso colgando brilla
+    if (p.combo > 1 || c.pw) {
+      // racha de perfectos o power-up: el piso colgando brilla
       g.lineStyle(3, 0xffd84d, 0.5 + 0.4 * Math.sin(S.el / 70));
       g.strokeRect(x - c.w / 2 - 5, y - c.h / 2 - 5, c.w + 10, c.h + 10);
     }
     slab(g, x, y, c.w, c.h, 0, c.col);
-    c.t.setPosition(x, y).setRotation(0);
-  }
+    c.t.setPosition(x, y).setRotation(0).setAlpha(1);
+  } else if (c) c.t.setAlpha(0);
 
   for (const q of p.parts) {
     g.fillStyle(q.c, Math.min(1, q.l * 1.5));
