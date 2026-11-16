@@ -124,6 +124,15 @@ const TXT = {
   sub: 'PLATANUS HACK 26 · SANTIAGO',
   tag: 'apila features · sobrevive a la hackathon · llega al demo day',
   go: '¡A HACKEAR!',
+  // Hitos de altura (cada 10 pisos)
+  mile: {
+    10: '¡10 PISOS!\nESTO YA ES UN EDIFICIO',
+    20: '¡20 PISOS!\nLOS INVERSORES ESTÁN MIRANDO',
+    30: '¡30 PISOS!\nRASCACIELOS EN 36 HORAS',
+    40: '¡40 PISOS!\n¿ESTO ES LEGAL?',
+  },
+  // Color del mensaje de perfecto según el combo (x1..x5)
+  perfCol: ['#e1ff00', '#e1ff00', '#f7ffd8', '#ffd84d', '#ff9a3c'],
   // Leaderboard
   rec: '¡NUEVO RÉCORD!',
   hint: '↑↓ LETRA   ←→ MOVER\nBOTÓN 1: OK   BOTÓN 2: ATRÁS',
@@ -368,9 +377,11 @@ function countdown(time) {
   sc.tweens.killTweensOf(t);
   t.setText(i < 3 ? String(3 - i) : TXT.go).setAlpha(1).setScale(1.8);
   sc.tweens.add({ targets: t, scale: 1, duration: 250, ease: 'Back.easeOut' });
-  if (i < 3) tone(440, 0.12, 'square', 0.1);
+  if (i < 3) SFX.beep();
   else {
-    tone(880, 0.3, 'square', 0.1, 1320);
+    SFX.beep(1);
+    S.ms = 0;
+    S.mt = 0;
     sc.tweens.add({ targets: t, alpha: 0, delay: 500, duration: 300 });
     S.ph = 'play';
   }
@@ -403,7 +414,6 @@ function start(n) {
   clearAll();
   S = { ph: 'play', P: [], n, el: 0, ne: EASY_H * HOUR_MS + 1500, lock: 0, ai: 0 };
   for (let i = 0; i < n; i++) S.P.push(mkPlayer(i, n));
-  tone(440, 0.1, 'square', 0.08, 880);
 }
 
 function endGame(survived) {
@@ -444,7 +454,7 @@ function endGame(survived) {
     p.hud.setVisible(false);
     for (const o of p.elim || []) o.setVisible(false);
   }
-  tone(330, 0.5, 'triangle', 0.12, 660);
+  SFX.over();
   S.mark = [];
   const qs = S.P.filter((p) => qualifies(p.score));
   if (qs.length) startNames(qs, sc.time.now);
@@ -467,6 +477,7 @@ function mkPlayer(i, n) {
     lives: 3, score: 0, combo: 0, perf: 0, maxH: 0, why: '', dead: false, rf: 0,
     qm: 0, qu: 0, qp: 0, shake: 0, risk: 0, ck: 0,
     bag: [], cbag: [], creeps: 0,
+    parts: [], rings: [], fl: 0, flc: 0xffffff, kick: 0, mk: {},
   };
   const x0 = p.cx - p.vw / 2;
   // zonas fijas por viewport: HUD (y 34-56) · eventos (66-130) · mensajes (140-190) · riel grúa (196)
@@ -558,14 +569,19 @@ function jenga(p) {
 // Todo lo que está sobre el piso i-1 se vuelca y cae.
 function topple(p, i, dir) {
   const n = p.floors.length - i;
-  for (const f of p.floors.splice(i)) floorFall(p, f, dir);
+  for (const f of p.floors.splice(i)) {
+    burst(p, f.cx, f.cy, 5, [f.col, C.lime3], 220);
+    floorFall(p, f, dir);
+  }
+  flash(p, RISK_COL, 0.7);
+  p.kick = 8;
   p.s *= 0.3;
   p.v *= 0.3;
   p.combo = 0;
   p.lives--;
   p.shake = 10 + n * 2;
   msg(p, say(n > 1 ? TXT.derr : TXT.cae, n > 1 ? 'derr' : 'cae') + '\n-1 CAFÉ', '#f7ffd8');
-  tone(160, 0.5, 'sawtooth', 0.12, 50);
+  SFX.crash();
   chain(p);
   if (p.lives <= 0) die(p, TXT.nocafe);
 }
@@ -626,15 +642,57 @@ function quake(p, m, dur, ev) {
     sc.tweens.add({ targets: t, scale: 1, duration: 200 });
     sc.tweens.add({ targets: t, alpha: 0, delay: dur, duration: 400 });
   }
-  tone(220, 0.35, 'sawtooth', 0.08, 110);
+  SFX.alarm();
+  flash(p, 0xff9a3c, 0.35);
 }
 
-function msg(p, s, col) {
+function msg(p, s, col, big) {
   const t = p.msgT;
   sc.tweens.killTweensOf(t);
-  t.setText(s).setColor(col || '#e1ff00').setAlpha(1).setScale(1.4);
-  sc.tweens.add({ targets: t, scale: 1, duration: 150 });
-  sc.tweens.add({ targets: t, alpha: 0, delay: 800, duration: 400 });
+  t.setText(s).setColor(col || '#e1ff00').setAlpha(1).setScale(big ? 1.9 : 1.4).setAngle(0);
+  sc.tweens.add({ targets: t, scale: 1, duration: big ? 260 : 150, ease: 'Back.easeOut' });
+  if (big) sc.tweens.add({ targets: t, angle: { from: -4, to: 4 }, duration: 90, yoyo: true, repeat: 3 });
+  sc.tweens.add({ targets: t, alpha: 0, delay: big ? 1100 : 800, duration: 400 });
+}
+
+// ---------- juice: partículas, anillos, flashes, puntaje flotante ----------
+
+// partículas en coordenadas de mundo del jugador (up: hacia arriba)
+function burst(p, x, y, n, col, sp, up) {
+  for (let i = 0; i < n; i++) {
+    const a = up ? rnd(0.3, 2.84) : rnd(0, 6.28);
+    const v = rnd(0.3, 1) * sp;
+    p.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, l: rnd(0.4, 0.9), c: col.length ? pick(col) : col, s: rnd(2, 5) });
+  }
+}
+const ring = (p, x, y) => p.rings.push({ x, y, r: 6, l: 1 });
+function flash(p, col, a) {
+  p.flc = col;
+  p.fl = Math.max(p.fl, a);
+}
+// texto "+250" que sube y se desvanece desde donde aterrizó el piso
+function pop(p, x, y, s, col) {
+  const t = txt(p.cx + x, GY - (y - p.cam), s, 18, col).setOrigin(0.5);
+  sc.grp.add(t);
+  sc.tweens.add({ targets: t, y: t.y - 60, alpha: 0, duration: 900, ease: 'Cubic.easeOut', onComplete: () => t.destroy() });
+}
+
+function updFx(p, dt) {
+  for (let i = p.parts.length; i--; ) {
+    const q = p.parts[i];
+    q.vy -= 600 * dt;
+    q.x += q.vx * dt;
+    q.y += q.vy * dt;
+    if ((q.l -= dt) <= 0) p.parts.splice(i, 1);
+  }
+  for (let i = p.rings.length; i--; ) {
+    const q = p.rings[i];
+    q.r += 260 * dt;
+    if ((q.l -= dt * 2.2) <= 0) p.rings.splice(i, 1);
+  }
+  p.fl *= Math.pow(0.004, dt);
+  p.kick *= Math.pow(0.001, dt);
+  for (const f of p.floors) if (f.sq) f.sq = Math.max(0, f.sq - dt * 4);
 }
 
 function upd(p, dt) {
@@ -652,6 +710,7 @@ function upd(p, dt) {
     }
   }
   p.shake *= Math.pow(0.02, dt);
+  updFx(p, dt);
   if (p.dead || (S.ph !== 'play' && S.ph !== 'title')) return;
 
   const h = hour();
@@ -669,8 +728,11 @@ function upd(p, dt) {
       p.s *= 0.4;
       for (const f of p.floors) f.ox *= 0.7;
       msg(p, 'REFACTOR!', '#f7ffd8');
-      tone(300, 0.25, 'triangle', 0.1, 900);
-    } else tone(120, 0.08, 'square', 0.05);
+      SFX.refactor();
+      flash(p, C.lime, 0.3);
+      ring(p, p.tx, p.ty);
+      for (const f of p.floors) burst(p, f.cx, f.cy, 1, [C.lime, C.white], 120, true);
+    } else SFX.denied();
   }
 
   // balanceo global: resorte-amortiguador + desbalance + temblor
@@ -701,7 +763,7 @@ function upd(p, dt) {
   // crujido: más frecuente cuanto mayor el riesgo
   if (p.risk > 0.15 && S.el >= p.ck) {
     p.ck = S.el + 900 - p.risk * 650;
-    tone(rnd(70, 110), 0.12, 'sawtooth', 0.04 + p.risk * 0.08, rnd(40, 60));
+    SFX.creak(p.risk);
   }
   if (p.risk > 0.6 && !p.warned) {
     p.warned = true;
@@ -731,7 +793,7 @@ function upd(p, dt) {
     const away = !p.ai && Date.now() - Math.max(LI[p.id] || 0, c.t0) > AUTO_DROP_MS;
     if (prs(p.id + '_1') || down || away || (p.ai && aiDrop(p, c))) {
       c.st = 'drop';
-      tone(520, 0.08, 'square', 0.06, 300);
+      SFX.drop();
     }
   } else {
     c.vy += 2400 * dt;
@@ -751,34 +813,53 @@ function land(p, c, tf) {
     p.combo = 0;
     p.lives--;
     p.shake = 8;
+    flash(p, RISK_COL, 0.4);
     msg(p, say(TXT.cae, 'cae') + '\n-1 CAFÉ', '#f7ffd8');
-    tone(200, 0.3, 'sawtooth', 0.1, 60);
+    SFX.slip();
     if (p.lives <= 0) return die(p, TXT.nocafe);
     p.next = S.el + 450;
     return;
   }
   const perf = Math.abs(dx) <= 5 * p.k;
+  const y0 = topH(p);
   p.floors.push({
     name: c.name, w: c.w, h: c.h, wt: c.wt, col: c.col, t: c.t,
-    y: topH(p), ox: perf ? 0 : dx / Math.cos(p.ta),
+    y: y0, ox: perf ? 0 : dx / Math.cos(p.ta), sq: 1,
   });
+  // polvo en las esquinas + "golpe" de cámara
+  const lx = perf ? p.tx : c.x;
+  for (const sx of [-1, 1]) burst(p, lx + (sx * c.w) / 2, y0, 5, [C.lime3, C.lime2], 110, true);
+  p.kick = Math.max(p.kick, 3);
   p.v += dx * 0.8;
   p.combo = perf ? p.combo + 1 : 0;
   const mult = 1 + Math.min(p.combo, 4);
   const pts = 100 * mult + (perf ? 50 : 0);
   p.score += pts;
   p.shake = Math.max(p.shake, 3);
+  pop(p, lx, y0 + c.h + 10, '+' + pts, perf ? TXT.perfCol[mult - 1] : '#f7ffd8');
   if (perf) {
     p.perf++;
-    msg(p, `${say(TXT.perf[mult - 1], 'perf')}\nx${mult}  +${pts}`);
-    tone(660 + p.combo * 110, 0.15, 'square', 0.08, 1320 + p.combo * 220);
+    msg(p, `${say(TXT.perf[mult - 1], 'perf')}\nx${mult}`, TXT.perfCol[mult - 1], 1);
+    SFX.perf(p.combo);
+    burst(p, lx, y0 + c.h, 10 + mult * 4, [C.lime, C.white, 0xffd84d], 200 + mult * 30, true);
+    ring(p, lx, y0 + c.h / 2);
+    flash(p, C.white, 0.2 + mult * 0.05);
+    p.kick = 5;
     if (S.n > 1) quake(S.P[1 - p.i], 70, 1800, say(TXT.rival, 'rival'));
   } else {
     const k = Math.abs(dx) <= 12 * p.k ? 'casi' : ov < 0.6 * c.w ? 'pelo' : 'normal';
-    msg(p, `${say(TXT[k], k)}\n+${pts}`, '#f7ffd8');
-    tone(180, 0.1, 'triangle', 0.15, 90);
+    msg(p, say(TXT[k], k), '#f7ffd8');
+    SFX.land();
   }
-  p.maxH = Math.max(p.maxH, p.floors.length - 1);
+  // hito cada 10 pisos (la primera vez que se alcanza)
+  const nf = p.floors.length - 1;
+  if (nf % 10 === 0 && nf > p.maxH) {
+    msg(p, TXT.mile[nf] || `¡${nf} PISOS!`, '#ffd84d', 1);
+    SFX.mile();
+    flash(p, C.lime, 0.5);
+    for (const sx of [-1, 1]) burst(p, lx + sx * 60, y0, 25, [C.lime, 0xffd84d, C.white], 340, true);
+  }
+  p.maxH = Math.max(p.maxH, nf);
   p.next = S.el + 250;
   chain(p);
 }
@@ -787,8 +868,10 @@ function die(p, reason) {
   p.dead = true;
   p.why = reason;
   p.shake = 22;
-  msg(p, reason, '#f7ffd8');
-  tone(150, 0.8, 'sawtooth', 0.15, 40);
+  msg(p, reason, '#f7ffd8', 1);
+  SFX.die();
+  flash(p, RISK_COL, 1);
+  p.kick = 12;
   const dir = Math.sign(p.s) || 1;
   if (p.cur) toFall(p, p.cur, dir, p.cur.x, p.cur.y, 0);
   p.cur = null;
@@ -822,6 +905,7 @@ function update(time, delta) {
       S.el += dt * 1000;
       const h = hour();
       events();
+      music();
       const am = TXT.amb[S.ai];
       if (am && h >= am[0]) {
         S.ai++;
@@ -896,7 +980,7 @@ function draw() {
 function drawP(p, g, bg) {
   const sh = p.shake;
   const ox = p.cx + (Math.random() - 0.5) * sh;
-  const oy = (Math.random() - 0.5) * sh;
+  const oy = (Math.random() - 0.5) * sh + p.kick;
   const x0 = p.cx - p.vw / 2;
   const SY = (y) => GY - (y - p.cam) + oy;
 
@@ -908,6 +992,15 @@ function drawP(p, g, bg) {
   bg.fillRect(x0, SY(0), p.vw, H);
   bg.fillStyle(C.lime, 0.5);
   bg.fillRect(x0, SY(0), p.vw, 2);
+  // marcas de altura cada 5 pisos
+  for (let n = 5; n <= p.maxH + 5; n += 5) {
+    const y = SY(n * FH * p.k);
+    if (!p.mk[n]) sc.bgrp.add((p.mk[n] = txt(0, 0, n + '', 11, '#5d6e12').setOrigin(0, 1)));
+    const m = p.mk[n];
+    m.setPosition(x0 + 6, y - 2).setVisible(y > ROPE_Y && y < H);
+    bg.fillStyle(C.lime, 0.1);
+    bg.fillRect(x0, y, p.vw, 1);
+  }
 
   // escombros: detrás de la torre (capa trasera), desvaneciéndose
   for (const f of p.fall) {
@@ -923,8 +1016,9 @@ function drawP(p, g, bg) {
     const rk = f.rk || 0;
     const x = ox + f.cx + (Math.random() - 0.5) * rk * 6;
     const y = SY(f.cy);
-    slab(g, x, y, f.w, f.h, f.a, rk > 0.02 ? mix(f.col, RISK_COL, 0.2 + rk * 0.8) : f.col, p.dead ? 0.35 : 1);
-    f.t.setPosition(x, y).setRotation(f.a).setAlpha(p.dead ? 0.35 : 1);
+    const q = f.sq || 0; // squash al aterrizar
+    slab(g, x, y + q * 3, f.w * (1 + 0.1 * q), f.h * (1 - 0.25 * q), f.a, rk > 0.02 ? mix(f.col, RISK_COL, 0.2 + rk * 0.8) : f.col, p.dead ? 0.35 : 1);
+    f.t.setPosition(x, y + q * 3).setRotation(f.a).setAlpha(p.dead ? 0.35 : 1).setScale(1 + 0.1 * q, 1 - 0.25 * q);
   }
 
   const c = p.cur;
@@ -938,8 +1032,37 @@ function drawP(p, g, bg) {
       g.fillStyle(C.lime2, 1);
       g.fillRect(x - 8, ROPE_Y - 4, 16, 6);
     }
+    if (p.combo > 1) {
+      // racha de perfectos: el piso colgando brilla
+      g.lineStyle(3, 0xffd84d, 0.5 + 0.4 * Math.sin(S.el / 70));
+      g.strokeRect(x - c.w / 2 - 5, y - c.h / 2 - 5, c.w + 10, c.h + 10);
+    }
     slab(g, x, y, c.w, c.h, 0, c.col);
     c.t.setPosition(x, y).setRotation(0);
+  }
+
+  for (const q of p.parts) {
+    g.fillStyle(q.c, Math.min(1, q.l * 1.5));
+    g.fillRect(ox + q.x - q.s / 2, SY(q.y) - q.s / 2, q.s, q.s);
+  }
+  for (const q of p.rings) {
+    g.lineStyle(3, C.lime, q.l);
+    g.strokeCircle(ox + q.x, SY(q.y), q.r);
+  }
+
+  // tarjeta tipo notificación de Slack detrás del evento
+  const ea = p.evT.alpha;
+  if (ea > 0.02 && p.evT.visible) {
+    const eh = p.subT.y + p.subT.height - 58 + 8;
+    g.fillStyle(C.ink, 0.88 * ea);
+    g.fillRect(x0 + 14, 58, p.vw - 28, eh);
+    g.fillStyle(0xff9a3c, ea);
+    g.fillRect(x0 + 14, 58, 5, eh);
+  }
+
+  if (p.fl > 0.01) {
+    sc.hg.fillStyle(p.flc, p.fl * 0.35);
+    sc.hg.fillRect(x0, 0, p.vw, H);
   }
 
   // riel de la grúa
@@ -1073,13 +1196,13 @@ function nameFrame(time) {
     }
     if (dy) {
       e.l[e.k] = (e.l[e.k] + dy + CHARS.length) % CHARS.length;
-      tone(900, 0.04, 'square', 0.05);
+      SFX.key();
     }
     // ←→ mueve el cursor; botón 2 retrocede; botón 1 confirma la letra
     if (prs(id + '_R')) e.k = Math.min(2, e.k + 1);
     if (prs(id + '_L') || prs(id + '_2')) e.k = Math.max(0, e.k - 1);
     if (prs(id + '_1')) {
-      tone(1200, 0.06, 'square', 0.06);
+      SFX.ok();
       if (e.k < 2) e.k++;
       else e.done = true;
     }
@@ -1111,7 +1234,7 @@ function saveNames(time) {
   TOP = cleanTop(TOP.concat(add)); // se muestra al tiro; luego se confirma con lo guardado
   showTop(TXT.saving);
   sc.goStart.setText(TXT.again);
-  tone(660, 0.3, 'triangle', 0.1, 1320);
+  SFX.record();
   saveTop(add).then((r) => {
     TOP = r.top;
     if (S.ph === 'over') showTop(r.ok ? TXT.saved : TXT.local);
@@ -1124,21 +1247,133 @@ function showTop(status) {
 
 // ---------- sonido ----------
 
-function tone(f, d, type, v, f2) {
+// Todo sintetizado con Web Audio: osciladores + un buffer de ruido blanco.
+let AC;
+let MG;
+let NOISE;
+function audio() {
+  if (!AC) {
+    try {
+      AC = sc.sound.context;
+      MG = AC.createGain();
+      MG.gain.value = 0.7;
+      MG.connect(AC.destination);
+      NOISE = AC.createBuffer(1, AC.sampleRate, AC.sampleRate);
+      const d = NOISE.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    } catch (e) {
+      AC = null;
+    }
+  }
+  return AC;
+}
+const at = (d) => (audio() ? AC.currentTime : 0) + d;
+
+function tone(f, d, type, v, f2, t0) {
   if (S && S.ph === 'title') return; // attract mode en silencio
+  if (!audio()) return;
   try {
-    const x = sc.sound.context;
-    const o = x.createOscillator();
-    const g = x.createGain();
-    const t = x.currentTime;
+    const o = AC.createOscillator();
+    const g = AC.createGain();
+    const t = t0 || AC.currentTime;
     o.type = type || 'square';
     o.frequency.setValueAtTime(f, t);
     if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
     g.gain.setValueAtTime(v || 0.1, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + d);
     o.connect(g);
-    g.connect(x.destination);
+    g.connect(MG);
     o.start(t);
     o.stop(t + d);
   } catch (e) {}
+}
+
+// ruido filtrado (golpes, derrumbes, hi-hats)
+function noise(d, v, f, f2, t0) {
+  if (S && S.ph === 'title') return;
+  if (!audio()) return;
+  try {
+    const s = AC.createBufferSource();
+    const b = AC.createBiquadFilter();
+    const g = AC.createGain();
+    const t = t0 || AC.currentTime;
+    s.buffer = NOISE;
+    b.frequency.setValueAtTime(f, t);
+    if (f2) b.frequency.exponentialRampToValueAtTime(f2, t + d);
+    g.gain.setValueAtTime(v, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + d);
+    s.connect(b);
+    b.connect(g);
+    g.connect(MG);
+    s.start(t, Math.random() * 0.5);
+    s.stop(t + d);
+  } catch (e) {}
+}
+
+const arp = (fs, step, d, type, v) => fs.forEach((f, i) => tone(f, d, type, v, 0, at(i * step)));
+const SFX = {
+  beep: (hi) => tone(hi ? 880 : 440, hi ? 0.3 : 0.12, 'square', 0.1, hi ? 1320 : 0),
+  drop: () => tone(520, 0.08, 'square', 0.05, 300),
+  land: () => {
+    noise(0.12, 0.3, 900, 200);
+    tone(140, 0.15, 'sine', 0.3, 50);
+  },
+  // arpegio que sube de tono con el combo
+  perf: (c) => {
+    SFX.land();
+    const b = 523 * Math.pow(2, Math.min(c, 8) / 12);
+    arp([0, 4, 7, 12].map((s) => b * Math.pow(2, s / 12)), 0.05, 0.12, 'square', 0.06);
+  },
+  slip: () => {
+    tone(400, 0.45, 'sawtooth', 0.08, 70);
+    noise(0.3, 0.1, 600, 100);
+  },
+  crash: () => {
+    noise(0.6, 0.4, 1200, 80);
+    tone(90, 0.6, 'sine', 0.35, 30);
+  },
+  creak: (r) => tone(rnd(70, 110), 0.12, 'sawtooth', 0.04 + r * 0.08, rnd(40, 60)),
+  // "knock-knock" de notificación + retumbo
+  alarm: () => {
+    arp([880, 660], 0.16, 0.12, 'triangle', 0.12);
+    noise(1.2, 0.15, 200, 60);
+  },
+  refactor: () => {
+    tone(300, 0.3, 'triangle', 0.12, 1200);
+    tone(1500, 0.15, 'sine', 0.05, 3000, at(0.15));
+  },
+  denied: () => tone(120, 0.08, 'square', 0.05),
+  mile: () => arp([784, 988, 1175, 1568], 0.08, 0.18, 'square', 0.07),
+  die: () => {
+    noise(0.9, 0.45, 1500, 60);
+    tone(150, 0.8, 'sawtooth', 0.15, 40);
+  },
+  over: () => arp([523, 440, 349, 262], 0.18, 0.25, 'triangle', 0.12),
+  record: () => arp([523, 659, 784, 1047, 1319], 0.09, 0.2, 'square', 0.07),
+  key: () => tone(900, 0.04, 'square', 0.05),
+  ok: () => tone(1200, 0.06, 'square', 0.06),
+};
+
+// Música chiptune: Am - F - C - G (bajo, arpegio, bombo, caja, hi-hat).
+// El tempo sube con la hora; bombo desde EASY_H y caja desde la hora 10.
+const PROG = [[0, 3, 7], [-4, 0, 3], [3, 7, 10], [-2, 2, 5]];
+function music() {
+  if (!audio()) return;
+  const now = AC.currentTime;
+  if (!S.mt || S.mt < now - 0.2) S.mt = now + 0.05;
+  const h = hour();
+  const sd = 15 / (105 + h * 1.6); // duración de una semicorchea
+  const nt = (st, o) => 110 * Math.pow(2, st / 12 + o);
+  while (S.mt < now + 0.15) {
+    const st = S.ms++ % 64;
+    const ch = PROG[st >> 4];
+    const i = st % 16;
+    const t = S.mt;
+    if (i % 2 === 0) tone(nt(ch[0], (i % 4) / 2), sd * 1.8, 'triangle', 0.09, 0, t);
+    tone(nt(ch[(h > 24 ? i * 2 : i) % 3], 2), sd * 0.9, 'square', 0.018, 0, t);
+    if (h >= EASY_H && i % 8 === 0) tone(150, 0.12, 'sine', 0.25, 45, t);
+    if (h >= 10 && i % 8 === 4) noise(0.1, 0.09, 3000, 0, t);
+    if (i % 2) noise(0.03, 0.03, 8000, 0, t);
+    S.mt += sd;
+  }
 }
