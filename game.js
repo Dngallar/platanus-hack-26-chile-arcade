@@ -115,6 +115,17 @@ const TXT = {
   nocafe: ['¡SIN CAFÉ!', 'SE ACABÓ EL CAFÉ... Y LAS GANAS'],
   demo: '¡LLEGÓ AL DEMO DAY!',
   warn: '¡CRUJE LA TORRE!\nUSA REFACTOR',
+  // Pantalla de título
+  sub: 'PLATANUS HACK 26 · SANTIAGO',
+  tag: 'apila features · sobrevive a la hackathon · llega al demo day',
+  go: '¡A HACKEAR!',
+  // Paneles que rotan en el attract mode
+  panels: [
+    'CÓMO JUGAR\n\nBOTÓN 1 o ↓ : SOLTAR FEATURE\n← → : AJUSTAR LA GRÚA\nBOTÓN 2 : REFACTOR (estabiliza)\n\nPISO PERFECTO = COMBO\nNO TE QUEDES SIN CAFÉ',
+    'LA HACKATHON\n\n36 HORAS PARA APILAR TU MVP\nMERGE CONFLICTS, MENTORES Y WIFI CAÍDA\nLO SACUDEN TODO\nSI LA TORRE SE PONE ROJA... ¡REFACTOR!',
+    'SCOPE CREEP\n\nBLOCKCHAIN · IA QUE HACE IA\nUBER DE EMPANADAS · METAVERSO B2B\nTINDER DE COFOUNDERS\n\nNADIE PIDIÓ ESTO. APÍLALO IGUAL.',
+    '2 JUGADORES\n\nPANTALLA DIVIDIDA\nCADA PISO PERFECTO LE MANDA\nUN TEMBLOR A TU RIVAL\n\nPRESIONA START2',
+  ],
   // Eventos (temblores): [titular, subtítulo estilo Slack]
   ev: [
     ['MERGE CONFLICT', '#dev — "¿quién pusheó directo a main?"'],
@@ -225,27 +236,117 @@ function create() {
   // comentario de ambiente: banda con fondo semitransparente, encima de la torre
   sc.tickBg = sc.add.rectangle(W / 2, H - 22, 10, 26, C.bg, 0.85).setStrokeStyle(1, C.lime3).setAlpha(0);
   sc.tick = txt(W / 2, H - 22, '', 14, '#e1ff00').setOrigin(0.5);
-  sc.big = txt(W / 2, H / 2, '', 22).setOrigin(0.5).setLineSpacing(8);
+  sc.big = txt(W / 2, 300, '', 80).setOrigin(0.5); // cuenta regresiva
   // pantalla de fin: filas fijas
   sc.go = sc.add.container(0, 0).setVisible(false);
   sc.goTitle = txt(W / 2, 130, '', 40).setOrigin(0.5);
   sc.goWhy = txt(W / 2, 190, '', 18, '#f7ffd8').setOrigin(0.5).setWordWrapWidth(720);
   sc.goTab = txt(W / 2, 250, '', 18, '#f7ffd8').setOrigin(0.5, 0).setAlign('left').setLineSpacing(10);
-  sc.goStart = txt(W / 2, 480, 'START PARA VOLVER', 18).setOrigin(0.5);
-  sc.go.add([sc.add.rectangle(W / 2, H / 2, W, H, C.bg, 0.88), sc.goTitle, sc.goWhy, sc.goTab, sc.goStart]);
-  toMenu();
+  sc.goStart = txt(W / 2, 470, 'START1: JUGAR 1P   ·   START2: JUGAR 2P', 18).setOrigin(0.5);
+  sc.goIdle = txt(W / 2, 505, '', 13, '#a8c700').setOrigin(0.5);
+  sc.go.add([sc.add.rectangle(W / 2, H / 2, W, H, C.bg, 0.88), sc.goTitle, sc.goWhy, sc.goTab, sc.goStart, sc.goIdle]);
+
+  // pantalla de título (sobre la torre demo del attract mode)
+  sc.ti = sc.add.container(0, 0);
+  sc.tiTitle = txt(W / 2, 92, 'MVP EN 36 HORAS', 56).setOrigin(0.5);
+  sc.tiPanelBg = sc.add.rectangle(W / 2, 300, 540, 200, C.bg, 0.82).setStrokeStyle(2, C.lime3);
+  sc.tiPanel = txt(W / 2, 300, '', 17, '#f7ffd8').setOrigin(0.5).setLineSpacing(4);
+  sc.tiPress = txt(W / 2, 455, 'PRESIONA START', 30).setOrigin(0.5);
+  sc.ti.add([
+    sc.add.rectangle(W / 2, H / 2, W, H, C.bg, 0.45),
+    sc.tiTitle,
+    txt(W / 2, 140, TXT.sub, 16, '#a8c700').setOrigin(0.5),
+    sc.tiPanelBg,
+    sc.tiPanel,
+    sc.tiPress,
+    txt(W / 2, 495, 'START1: 1 JUGADOR   ·   START2: 2 JUGADORES', 15, '#f7ffd8').setOrigin(0.5),
+    txt(W / 2, 572, TXT.tag, 13, '#a8c700').setOrigin(0.5),
+  ]);
+  sc.tweens.add({ targets: sc.tiPress, alpha: 0.15, duration: 500, yoyo: true, repeat: -1 });
+  sc.tweens.add({ targets: sc.tiTitle, scale: 1.04, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+  toTitle();
 }
 
-// ---------- flujo ----------
+// ---------- flujo: título (attract) → cuenta → juego → fin → ... ----------
 
-function toMenu() {
+function toTitle() {
   clearAll();
-  S = { ph: 'menu', P: [], el: 0, lock: 0 };
-  sc.big.setText(
-    'MVP EN 36 HORAS\n\n' +
-      'ENTER / START1 : 1 JUGADOR\n2 / START2 : 2 JUGADORES\n\n' +
-      'BOTÓN 1 o ↓ : SOLTAR\nBOTÓN 2 : REFACTOR (estabiliza)\nJOYSTICK ←→ : AJUSTAR GRÚA',
-  );
+  S = { ph: 'title', P: [], n: 1, el: 0, ne: 0, pi: 0, pt: 0 };
+  newDemo();
+  sc.ti.setVisible(true);
+  showPanel(0);
+}
+
+// Torre demo manejada por una IA simple (attract mode)
+function newDemo() {
+  sc.grp.removeAll(true);
+  sc.bgrp.removeAll(true);
+  S.el = 5 * HOUR_MS; // arranca con temblores y algo de scope creep
+  S.ne = S.el + 3000;
+  const d = mkPlayer(0, 1);
+  d.ai = true;
+  d.id = 'AI';
+  for (const t of [d.hud, d.msgT, d.evT, d.subT]) t.setVisible(false);
+  S.P = [d];
+}
+
+// la IA suelta cuando la grúa está a menos de una tolerancia al azar del tope
+function aiDrop(p, c) {
+  if (c.tol == null) c.tol = (Math.random() < 0.35 ? rnd(0, 4) : rnd(6, 30)) * p.k;
+  return Math.abs(c.x - p.tx) < c.tol;
+}
+
+function showPanel(i) {
+  S.pi = i % TXT.panels.length;
+  S.pt = sc.time.now + 5500;
+  sc.tiPanel.setText(TXT.panels[S.pi]).setAlpha(0);
+  sc.tiPanelBg.setSize(Math.max(420, sc.tiPanel.width + 50), sc.tiPanel.height + 36);
+  sc.tweens.add({ targets: sc.tiPanel, alpha: 1, duration: 300 });
+}
+
+function titleFrame(time, dt) {
+  S.el += dt * 1000;
+  events();
+  const d = S.P[0];
+  upd(d, dt);
+  // el título tiembla con la torre demo
+  sc.tiTitle.setPosition(W / 2 + (Math.random() - 0.5) * d.shake, 92 + (Math.random() - 0.5) * d.shake * 0.5);
+  if ((d.dead && !d.fall.length) || d.floors.length > 16 || hour() > 30) newDemo();
+  if (time >= S.pt) showPanel(S.pi + 1);
+}
+
+function begin(n) {
+  sc.ti.setVisible(false);
+  start(n);
+  S.ph = 'count';
+  S.cdT = sc.time.now;
+  S.cdi = -1;
+}
+
+function countdown(time) {
+  const i = Math.floor((time - S.cdT) / 650);
+  if (i === S.cdi) return;
+  S.cdi = i;
+  const t = sc.big;
+  sc.tweens.killTweensOf(t);
+  t.setText(i < 3 ? String(3 - i) : TXT.go).setAlpha(1).setScale(1.8);
+  sc.tweens.add({ targets: t, scale: 1, duration: 250, ease: 'Back.easeOut' });
+  if (i < 3) tone(440, 0.12, 'square', 0.1);
+  else {
+    tone(880, 0.3, 'square', 0.1, 1320);
+    sc.tweens.add({ targets: t, alpha: 0, delay: 500, duration: 300 });
+    S.ph = 'play';
+  }
+}
+
+// temblores de hackathon (juego y attract)
+function events() {
+  const h = hour();
+  if (h >= EASY_H && S.el >= S.ne) {
+    const ev = say(TXT.ev, 'ev');
+    for (const p of S.P) quake(p, 45 + h * 4, 2600, ev);
+    S.ne = S.el + rnd(7000, 12000) - h * 80;
+  }
 }
 
 function clearAll() {
@@ -271,6 +372,7 @@ function start(n) {
 function endGame(survived) {
   S.ph = 'over';
   S.lock = sc.time.now + 1200;
+  S.idle = sc.time.now + 20000;
   for (const p of S.P) {
     if (survived && !p.dead) {
       p.score += 1000;
@@ -497,7 +599,7 @@ function upd(p, dt) {
     }
   }
   p.shake *= Math.pow(0.02, dt);
-  if (p.dead || S.ph !== 'play') return;
+  if (p.dead || (S.ph !== 'play' && S.ph !== 'title')) return;
 
   const h = hour();
   const n = p.floors.length;
@@ -507,7 +609,7 @@ function upd(p, dt) {
   p.nudge = clamp(p.nudge + dir * 150 * dt, -70 * p.k, 70 * p.k);
 
   // REFACTOR: estabiliza la torre
-  if (prs(p.id + '_2')) {
+  if (prs(p.id + '_2') || (p.ai && p.risk > 0.45 && S.el >= p.rf)) {
     if (S.el >= p.rf) {
       p.rf = S.el + 7000;
       p.v *= 0.2;
@@ -572,7 +674,7 @@ function upd(p, dt) {
     c.y = top + HANG;
     // soltar: botón 1, o palanca ABAJO (solo flanco y sin izquierda/derecha)
     const down = prs(p.id + '_D') && !CTL.held[p.id + '_L'] && !CTL.held[p.id + '_R'];
-    if (prs(p.id + '_1') || down) {
+    if (prs(p.id + '_1') || down || (p.ai && aiDrop(p, c))) {
       c.st = 'drop';
       tone(520, 0.08, 'square', 0.06, 300);
     }
@@ -642,18 +744,17 @@ function die(p, reason) {
 
 function update(time, delta) {
   const dt = Math.min(delta, 50) / 1000;
-  if (S.ph === 'menu') {
-    if (prs('START1')) start(1);
-    else if (prs('START2')) start(2);
+  if (S.ph === 'title') {
+    if (prs('START1')) begin(1);
+    else if (prs('START2')) begin(2);
+    else titleFrame(time, dt);
+  } else if (S.ph === 'count') {
+    countdown(time);
   } else {
     if (S.ph === 'play') {
       S.el += dt * 1000;
       const h = hour();
-      if (h >= EASY_H && S.el >= S.ne) {
-        const ev = say(TXT.ev, 'ev');
-        for (const p of S.P) quake(p, 45 + h * 4, 2600, ev);
-        S.ne = S.el + rnd(7000, 12000) - h * 80;
-      }
+      events();
       const am = TXT.amb[S.ai];
       if (am && h >= am[0]) {
         S.ai++;
@@ -667,10 +768,16 @@ function update(time, delta) {
     if (S.ph === 'play') {
       if (S.P.every((p) => p.dead)) endGame(false);
       else if (hour() >= END_H) endGame(true);
-    } else if (time > S.lock && (prs('START1') || prs('START2'))) toMenu();
-    hud();
-    draw();
+    } else {
+      // fin: reinicio rápido sin pasar por el título, o vuelta al attract si nadie juega
+      sc.goIdle.setText(`volviendo al título en ${Math.max(0, Math.ceil((S.idle - time) / 1000))}`);
+      if (time > S.lock && prs('START1')) begin(1);
+      else if (time > S.lock && prs('START2')) begin(2);
+      else if (time > S.idle) toTitle();
+    }
   }
+  if (S.ph !== 'title') hud();
+  draw();
   for (const k in CTL.pressed) CTL.pressed[k] = false;
 }
 
@@ -778,6 +885,7 @@ function drawP(p, g, bg) {
 // ---------- sonido ----------
 
 function tone(f, d, type, v, f2) {
+  if (S && S.ph === 'title') return; // attract mode en silencio
   try {
     const x = sc.sound.context;
     const o = x.createOscillator();
