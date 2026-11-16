@@ -89,13 +89,42 @@ const C = {
   ink: 0x0b0f03,
   white: 0xf7ffd8,
 };
-const FLOOR_COLS = [0xe1ff00, 0xc8e600, 0xd4ff4d, 0xb5d900];
+// Colores de piso por categoría (neón saturado, texto oscuro legible).
+// El lima queda reservado para la marca: título, HUD, combos y la base IDEA.
+const CAT = {
+  back: [0x3fd0ff, 0x62a8ff], // backend: cian / azul
+  front: [0xff5fd2, 0xff8ac8], // frontend: magenta / rosa
+  ia: [0xb48cff, 0x9f7dff], // IA: violeta
+  pay: [0x3dffb4, 0x6dffc8], // pagos: verde menta
+  misc: [0xffe14d, 0xffae42], // resto: amarillo / naranja
+};
+const CREEP_COLS = [0xffffff, 0xfff66b, 0x7dfff2]; // scope creep: chillones...
+const CREEP_BORDER = 0xff2e88; // ...con borde rosa grueso
+const PW_COL = 0xffc61a; // power-ups: dorado con borde blanco
+const RISK_BORDER = 0xff2020; // riesgo: borde rojo parpadeante (además del tinte)
+// Color de la tarjeta de evento según el tipo
+const EV_COL = { slack: 0xff9a3c, rival: 0xff4fd8, quake: 0xff3b3b, demo: 0xe1ff00 };
 
-// [nombre, ancho, peso]
+// [nombre, ancho, peso, categoría]
 const FEATS = [
-  ['LOGIN', 110, 1], ['LANDING', 140, 1], ['BASE DE DATOS', 130, 1.4], ['API', 90, 1],
-  ['IA', 70, 1.2], ['DARK MODE', 120, 0.8], ['PAGOS', 100, 1.2], ['CHATBOT', 100, 1],
-  ['ONBOARDING', 130, 1], ['NOTIFICACIONES', 140, 0.9], ['MAPA', 90, 1], ['ANALYTICS', 120, 1.1],
+  ['LOGIN', 110, 1, 'misc'], ['LANDING', 140, 1, 'front'], ['BASE DE DATOS', 130, 1.4, 'back'], ['API', 90, 1, 'back'],
+  ['IA', 70, 1.2, 'ia'], ['DARK MODE', 120, 0.8, 'front'], ['PAGOS', 100, 1.2, 'pay'], ['CHATBOT', 100, 1, 'ia'],
+  ['ONBOARDING', 130, 1, 'front'], ['NOTIFICACIONES', 140, 0.9, 'misc'], ['MAPA', 90, 1, 'misc'], ['ANALYTICS', 120, 1.1, 'misc'],
+];
+
+// Cielo según la hora (tenue): [hora, color arriba, color horizonte, estrellas 0..1]
+const SKY = [
+  [0, 0x060a1c, 0x0b1430, 0.6], // noche azul
+  [3, 0x0d0820, 0x1f0f33, 0.45], // madrugada violeta
+  [6, 0x1a0f26, 0x4a2630, 0.1], // amanecer naranja/rosa
+  [9, 0x0e1a2e, 0x1e3348, 0], // día
+  [16, 0x0f1c30, 0x22364a, 0],
+  [19, 0x1a1028, 0x42222c, 0.15], // atardecer
+  [22, 0x060a1c, 0x0b1430, 0.6], // noche otra vez
+  [27, 0x0d0820, 0x1f0f33, 0.45],
+  [30, 0x1a0f26, 0x4a2630, 0.1],
+  [33, 0x0e1a2e, 0x1e3348, 0],
+  [36, 0x08080c, 0x121018, 0.2], // Demo Day: escenario oscuro con focos
 ];
 // Scope creep: aparecen a medida que avanza la noche
 const CREEP = [
@@ -106,61 +135,62 @@ const CREEP = [
 ];
 
 // ===== TODOS LOS TEXTOS DEL JUEGO (editar aquí) =====
+// Tono: seco, de dev real (Slack, commits, logs). Pocos signos de exclamación;
+// el chiste está en la subestimación y no se explica.
 const TXT = {
   // Piso perfecto: un grupo por nivel de combo (x1 .. x5)
   perf: [
-    ['¡MERGEADO SIN CONFLICTOS!', '¡PASA TODOS LOS TESTS!', '¡CLEAN CODE!'],
-    ['¡DEPLOY EN VERDE!', '¡LGTM, SHIP IT!', '¡LA RAJA!'],
-    ['¡PRODUCT-MARKET FIT!', '¡PULENTO!', '¡CERO WARNINGS!'],
-    ['¡10X ENGINEER!', '¡LOS JUECES TOMAN NOTA!', '¡BACÁN, COMPADRE!'],
-    ['¡ESTO ES UNICORNIO!', '¡IPO EN 36 HORAS!', '¡TE LLAMA SILICON VALLEY!'],
+    ['tests en verde', 'merge sin conflictos', 'compila a la primera'],
+    ['LGTM', 'deploy en verde', 'cero warnings'],
+    ['nadie entiende cómo funciona,\npero funciona', 'no tocar: funciona', 'el linter no dijo nada'],
+    ['aprobado sin comentarios', 'el PM no tiene preguntas', 'cobertura 100%.\nde un archivo'],
+    ['el CTO quiere saber tu nombre', 'esto entra en el pitch', 'alguien está grabando esto'],
   ],
   // Casi perfecto (a pocos píxeles)
-  casi: ['¡CASI PERFECTO!', 'LE FALTÓ UN PIXEL', 'LGTM (CASI)', '¡ESO, ESO, ESO!'],
+  casi: ['off by one', 'falta un pixel', 'casi. ticket para después', 'lo arreglo en la v2'],
   // Aterrizó apenas apoyado
-  pelo: ['¡POR UN PELO!', 'COLGANDO DE UN HILO', 'FUNCIONA EN MI MÁQUINA', '¡AGÁRRATE, CATALINA!'],
+  pelo: ['funciona en mi máquina', 'sostenido por un try/catch', 'no lo mires mucho', 'apenas'],
   // Piso normal
   normal: [
-    'SHIPPEADO', 'OTRA FEATURE MÁS', 'MERGEADO A LA RÁPIDA', 'SIN CODE REVIEW',
-    'EN LOCALHOST SE VE BIEN', 'COMMIT: "fix"', 'DALE NOMÁS', 'YA, SIRVE',
+    'commit: "fix"', 'en localhost se ve bien', 'sin code review', 'commit: "cambios"',
+    'merge a main un viernes', 'TODO: refactorizar', 'commit: "ahora sí"', 'otra feature',
   ],
   // El piso no se apoya y se cae
-  cae: [
-    '¡NO COMPILA!', 'ESO ERA DEUDA TÉCNICA', '404: FEATURE NOT FOUND', '¡CHUTA!',
-    'SE FUE A PRODUCCIÓN... Y AL SUELO', 'ROLLBACK', '¡QUÉ FOME!',
-  ],
-  // Derrumbe parcial (regla Jenga)
+  cae: ['no compila', 'eso era deuda técnica', '404', 'rollback', 'undefined is not a function', 'segfault'],
+  // Derrumbe parcial (regla Jenga o colapso de la parte alta)
   derr: [
-    '¡SE DERRUMBÓ EL BACKEND!', 'GIT RESET --HARD', 'LA DEUDA TÉCNICA COBRA INTERESES',
-    '¡QUEDÓ LA ESCOBA!', 'ESTO NO ESCALA', 'REFACTORIZAR ERA OPCIONAL, DIJERON',
+    'git reset --hard', 'esto no escala', 'la deuda técnica cobró intereses',
+    'git push --force', 'se cayó el backend', 'nadie hizo refactor',
   ],
-  // Fin de partida
-  // Motivos de eliminación (un texto fijo por causa)
-  over: '¡COLAPSÓ EL MVP!',
-  nocafe: '¡SIN CAFÉ!',
+  minus: '-1 café',
+  rf: 'commit: "refactor"',
+  // Motivos de fin (un texto fijo por causa)
+  over: 'COLAPSÓ EL MVP',
+  nocafe: 'SE ACABÓ EL CAFÉ',
   elim: 'ELIMINADO',
-  away: '¡SE QUEDÓ DORMIDO!',
+  away: 'SE QUEDÓ DORMIDO',
   wait: 'esperando al rival...',
-  demo: '¡SOBREVIVIÓ AL DEMO DAY!',
-  warn: '¡CRUJE LA TORRE!\nUSA REFACTOR',
+  demo: 'SOBREVIVIÓ AL DEMO DAY',
+  warn: 'la torre está crujiendo\nBOTÓN 2: REFACTOR',
   // Pantalla de título
   sub: 'PLATANUS HACK 26 · SANTIAGO',
-  tag: 'apila features · sobrevive a la hackathon · llega al demo day',
-  go: '¡A HACKEAR!',
+  tag: 'apila features. aguanta los temblores. llega al demo day.',
+  go: 'npm start',
   // Hitos de altura (cada 10 pisos)
   mile: {
-    10: '¡10 PISOS!\nESTO YA ES UN EDIFICIO',
-    20: '¡20 PISOS!\nLOS INVERSORES ESTÁN MIRANDO',
-    30: '¡30 PISOS!\nRASCACIELOS EN 36 HORAS',
-    40: '¡40 PISOS!\n¿ESTO ES LEGAL?',
+    10: '10 pisos.\nsin tests',
+    20: '20 pisos.\ncero documentación',
+    30: '30 pisos.\nnadie sabe qué hace el piso 4',
+    40: '40 pisos.\nesto ya no es un MVP',
+    50: '50 pisos.\nfelicitaciones, es un monolito',
   },
-  // Color del mensaje de perfecto según el combo (x1..x5)
-  perfCol: ['#e1ff00', '#e1ff00', '#f7ffd8', '#ffd84d', '#ff9a3c'],
+  // Color del mensaje de perfecto según el combo (x1..x5): lima de marca
+  perfCol: ['#e1ff00', '#e1ff00', '#ecff66', '#f4ffa8', '#ffffff'],
   // Leaderboard
-  rec: '¡NUEVO RÉCORD!',
+  rec: 'NUEVO RÉCORD',
   hint: '↑↓ LETRA   ←→ MOVER\nBOTÓN 1: OK   BOTÓN 2: ATRÁS',
   ready: 'LISTO',
-  topEmpty: 'NADIE HA LLEGADO AL DEMO DAY...\n¡SÉ EL PRIMERO!',
+  topEmpty: 'NADIE HA LLEGADO AL\nDEMO DAY TODAVÍA',
   saving: '(guardando...)',
   saved: '(guardado)',
   local: '(sin conexión: solo local)',
@@ -168,14 +198,14 @@ const TXT = {
   // Paneles que rotan en el attract mode
   // null = panel TOP 10 (se arma con los récords guardados)
   panels: [
-    'CÓMO JUGAR\n\nBOTÓN 1 o ↓ : SOLTAR FEATURE\n← → : AJUSTAR LA GRÚA\nBOTÓN 2 : REFACTOR (estabiliza)\n\nPISO PERFECTO = COMBO\nNO TE QUEDES SIN CAFÉ',
+    'CÓMO JUGAR\n\nBOTÓN 1 o ↓ : SOLTAR FEATURE\n← → : AJUSTAR LA GRÚA\nBOTÓN 2 : REFACTOR (estabiliza)\n\nPISO PERFECTO = COMBO\nSIN CAFÉ = GAME OVER',
     null,
-    'LA HACKATHON\n\n36 HORAS PARA APILAR TU MVP\nMERGE CONFLICTS, MENTORES Y WIFI CAÍDA\nLO SACUDEN TODO\nSI LA TORRE SE PONE ROJA... ¡REFACTOR!',
-    'SCOPE CREEP\n\nBLOCKCHAIN · IA QUE HACE IA\nUBER DE EMPANADAS · METAVERSO B2B\nTINDER DE COFOUNDERS\n\nNADIE PIDIÓ ESTO. APÍLALO IGUAL.',
+    'LA HACKATHON\n\n36 HORAS PARA APILAR TU MVP\nMERGE CONFLICTS, MENTORES, WIFI CAÍDA\nVAN A SACUDIRLO TODO\n\nTORRE EN ROJO = REFACTOR',
+    'SCOPE CREEP\n\nBLOCKCHAIN · IA QUE HACE IA\nUBER DE EMPANADAS · METAVERSO B2B\nTINDER DE COFOUNDERS\n\nNADIE LO PIDIÓ. VA IGUAL.',
     null,
-    '2 JUGADORES\n\nPANTALLA DIVIDIDA\nCADA PISO PERFECTO LE MANDA\nUN TEMBLOR A TU RIVAL\n\nPRESIONA START2',
+    '2 JUGADORES\n\nPANTALLA DIVIDIDA\nCADA PISO PERFECTO LE MANDA\nUN TEMBLOR AL OTRO\n\nSTART2',
   ],
-  // Eventos (temblores): [titular, subtítulo estilo Slack]
+  // Eventos (temblores): [titular, subtítulo estilo Slack, efecto]
   // Efectos: narrow = el próximo piso llega a medias · fast/slow = grúa rápida/lenta
   // blind = la grúa parpadea · pivot = la grúa salta al otro lado · creep = próximo piso absurdo
   // big = temblor más fuerte · '' = solo temblor
@@ -183,41 +213,41 @@ const TXT = {
     ['MERGE CONFLICT', '#dev — "¿quién pusheó directo a main?"', 'narrow'],
     ['SE CAYÓ LA API', '#general — "¿alguien tiene otra API key?"', 'fast'],
     ['WIFI CAÍDA', '#random — "¿alguien comparte datos?"', 'blind'],
-    ['PASÓ EL MENTOR', '#general — el mentor: "¿y si lo hacen B2B?"', 'creep'],
-    ['¡PIVOTEEN!', '#anuncios — "ahora es una app de citas para mascotas"', 'pivot'],
-    ['SE ACABARON LAS SOPAIPILLAS', '#random — "quedan puros sobres de té"', ''],
+    ['PASÓ EL MENTOR', '#general — mentor: "¿y si lo hacen B2B?"', 'creep'],
+    ['PIVOTEEN', '#anuncios — "ahora es para mascotas"', 'pivot'],
+    ['SE ACABARON LAS SOPAIPILLAS', '#random — "quedan sobres de té"', ''],
     ['NPM INSTALL', '#dev — "lleva 40 minutos... y sigue"', 'slow'],
-    ['DEPLOY A LAS 4AM', '#dev — "un deploy chiquitito nomás"', 'fast'],
-    ['CORTE DE LUZ', '#general — "¿alguien guardó?"', 'blind'],
-    ['TEMBLOR DE VERDAD', '#random — "tranqui, fue un 5,8 nomás"', 'big'],
+    ['DEPLOY A LAS 4AM', '#dev — "es un cambio chico"', 'fast'],
+    ['CORTE DE LUZ', '#general — "¿alguien hizo commit?"', 'blind'],
+    ['TEMBLOR DE VERDAD', '#random — "fue un 5,8. sigan"', 'big'],
   ],
   half: ' (A MEDIAS)',
   // Power-ups: [nombre, ancho, peso, mensaje al aterrizar]
-  cafe: ['CAFÉ DE GRANO', 110, 1, '¡ESPRESSO DOBLE!\n+1 CAFÉ'],
-  pair: ['PAIR PROGRAMMING', 200, 1.1, '¡PAIR PROGRAMMING!\nREFACTOR LISTO'],
+  cafe: ['CAFÉ DE GRANO', 110, 1, 'café de grano\n+1 café'],
+  pair: ['PAIR PROGRAMMING', 200, 1.1, 'pair programming\nrefactor listo'],
   // Final
-  dd: ['DEMO DAY', 'los jueces prueban tu MVP: ¡aguanta 12 segundos!'],
+  dd: ['DEMO DAY', 'los jueces van a probar tu MVP. 12 segundos.'],
   ddClock: 'DEMO DAY',
   // Temblor enviado por el rival (2P)
   rival: [
-    ['TU RIVAL SHIPPEÓ', '#general — "¿vieron el demo del equipo de al lado?"'],
-    ['EL OTRO EQUIPO TIENE TRACCIÓN', '#random — "dicen que ya tienen 3 usuarios"'],
-    ['TU RIVAL LEVANTÓ RONDA', '#general — "pre-seed de 2 empanadas"'],
+    ['EL OTRO EQUIPO HIZO DEPLOY', '#general — "¿vieron la demo de al lado?"'],
+    ['EL OTRO EQUIPO TIENE USUARIOS', '#random — "tres. uno es la mamá"'],
+    ['EL OTRO EQUIPO TIENE LOGO', '#general — "lo hicieron en Canva"'],
   ],
   // Ambiente según la hora: [hora, comentario]
   amb: [
-    [1, 'alguien ya está pidiendo pizza'],
-    [3, '3 AM: alguien pidió otra pizza'],
-    [6, 'amanece. nadie ha dormido'],
-    [9, 'llegó el desayuno: puras sopaipillas'],
-    [12, 'mediodía: "¿y si le agregamos IA?"'],
-    [16, 'alguien se durmió en un puff'],
-    [20, 'el café ya sabe a tierra'],
+    [1, 'alguien ya pidió pizza'],
+    [3, '3 AM. otra pizza'],
+    [6, 'amanece. nadie durmió'],
+    [9, 'desayuno: sopaipillas'],
+    [12, 'mediodía. "¿y si le metemos IA?"'],
+    [16, 'alguien duerme en un puff'],
+    [20, 'el café sabe a tierra'],
     [24, '24 horas y el repo tiene 3 commits'],
-    [27, '3 AM otra vez. queda pura fe'],
-    [30, 'los jueces ya llegaron'],
+    [27, '3 AM otra vez'],
+    [30, 'llegaron los jueces'],
     [33, 'alguien ensaya el pitch en el baño'],
-    [35, '"¿quién hizo las slides?" ... silencio'],
+    [35, '"¿quién hizo las slides?"'],
   ],
 };
 
@@ -242,6 +272,16 @@ const AUTO_DROP_MS = 8000; // sin input del jugador: el piso se suelta solo
 const ABANDON_MS = 20000; // sin ningún input: la partida termina y vuelve al título
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// cielo a la hora h: interpola entre las claves de SKY
+function sky(h) {
+  let i = 0;
+  while (i < SKY.length - 2 && h > SKY[i + 1][0]) i++;
+  const [h0, t0, b0, s0] = SKY[i];
+  const [h1, t1, b1, s1] = SKY[i + 1];
+  const t = clamp((h - h0) / (h1 - h0), 0, 1);
+  return [mix(t0, t1, t), mix(b0, b1, t), s0 + (s1 - s0) * t];
+}
+
 // mezcla lineal de dos colores 0xRRGGBB
 const mix = (a, b, t) => {
   let r = 0;
@@ -298,7 +338,7 @@ function create() {
   sc.clock = txt(W / 2, 8, '', 18).setOrigin(0.5, 0);
   // comentario de ambiente: banda con fondo semitransparente, encima de la torre
   sc.tickBg = sc.add.rectangle(W / 2, H - 22, 10, 26, C.bg, 0.85).setStrokeStyle(1, C.lime3).setAlpha(0);
-  sc.tick = txt(W / 2, H - 22, '', 14, '#e1ff00').setOrigin(0.5);
+  sc.tick = txt(W / 2, H - 22, '', 15, '#e1ff00').setOrigin(0.5);
   sc.big = txt(W / 2, 300, '', 80).setOrigin(0.5); // cuenta regresiva
   // pantalla de fin: filas fijas
   sc.go = sc.add.container(0, 0).setVisible(false);
@@ -430,7 +470,7 @@ function demoDay() {
       if (p.dead) continue;
       p.qm = DD_Q;
       p.qu = S.el + DD_MS;
-      card(p, TXT.dd, DD_MS - 400);
+      card(p, TXT.dd, DD_MS - 400, EV_COL.demo);
     }
   }
   // sacudones de los jueces
@@ -446,7 +486,8 @@ function events() {
   const h = hour();
   if (h >= EASY_H && S.el >= S.ne && !S.dd) {
     const ev = say(TXT.ev, 'ev');
-    for (const p of S.P) quake(p, QUAKE(h) * (ev[2] === 'big' ? 1.6 : 1), 2600, ev);
+    const big = ev[2] === 'big';
+    for (const p of S.P) quake(p, QUAKE(h) * (big ? 1.6 : 1), 2600, ev, big ? EV_COL.quake : EV_COL.slack);
     S.ne = S.el + rnd(7000, 12000) - h * 80;
   }
 }
@@ -538,11 +579,11 @@ function mkPlayer(i, n) {
   // zonas fijas por viewport: HUD (y 34-56) · eventos (66-130) · mensajes (140-190) · riel grúa (196)
   p.hud = txt(x0 + 12, 34, '', n > 1 ? 13 : 15).setOrigin(0, 0).setAlign('left');
   p.evT = txt(p.cx, 66, '', 20, '#f7ffd8').setOrigin(0.5, 0).setAlpha(0).setWordWrapWidth(p.vw - 30);
-  p.subT = txt(p.cx, 92, '', 16, '#a8c700').setOrigin(0.5, 0).setAlpha(0).setWordWrapWidth(p.vw - 30);
-  p.msgT = txt(p.cx, 166, '', 18).setOrigin(0.5).setAlpha(0).setWordWrapWidth(p.vw - 30).setLineSpacing(2);
+  p.subT = txt(p.cx, 92, '', 17, '#a8c700').setOrigin(0.5, 0).setAlpha(0).setWordWrapWidth(p.vw - 30);
+  p.msgT = txt(p.cx, 166, '', 20).setOrigin(0.5).setAlpha(0).setWordWrapWidth(p.vw - 30).setLineSpacing(2);
   sc.grp.add([p.hud, p.msgT, p.evT, p.subT]);
-  const base = { name: 'IDEA', w: 170 * k, h: FH * k, wt: 3, col: C.lime3, ox: 0, y: 0 };
-  base.t = floorText(base, '#e1ff00');
+  const base = { name: 'IDEA', w: 170 * k, h: FH * k, wt: 3, col: C.lime, ox: 0, y: 0 };
+  base.t = floorText(base);
   p.floors.push(base);
   chain(p);
   return p;
@@ -640,7 +681,7 @@ function topple(p, i, dir) {
   p.combo = 0;
   p.lives--;
   p.shake = 10 + n * 2;
-  msg(p, say(n > 1 ? TXT.derr : TXT.cae, n > 1 ? 'derr' : 'cae') + '\n-1 CAFÉ', '#f7ffd8');
+  msg(p, say(n > 1 ? TXT.derr : TXT.cae, n > 1 ? 'derr' : 'cae') + '\n' + TXT.minus, '#f7ffd8');
   SFX.crash();
   chain(p);
   if (p.lives <= 0) die(p, TXT.nocafe);
@@ -691,7 +732,9 @@ function spawnCur(p) {
   const d = pw || (isCreep ? fromBag(p, 'cbag', CREEP) : fromBag(p, 'bag', FEATS));
   const c = {
     name: d[0], w: d[1] * p.k, h: FH * p.k, wt: d[2], pw: pw && d[3],
-    col: pw ? 0xffd84d : isCreep ? C.white : pick(FLOOR_COLS),
+    col: pw ? PW_COL : isCreep ? pick(CREEP_COLS) : pick(CAT[d[3]]),
+    bc: pw ? 0xffffff : isCreep ? CREEP_BORDER : C.ink, // borde
+    bw: pw || isCreep ? 3 : 2,
     x: 0, y: topH(p) + HANG, vy: 0, st: 'hang', t0: Date.now(),
   };
   if (e === 'narrow' && !pw) {
@@ -702,7 +745,7 @@ function spawnCur(p) {
   p.cur = c;
 }
 
-function quake(p, m, dur, ev) {
+function quake(p, m, dur, ev, col) {
   if (p.dead) return;
   p.qm = Math.max(S.el < p.qu ? p.qm : 0, m);
   p.qu = S.el + dur;
@@ -716,11 +759,12 @@ function quake(p, m, dur, ev) {
       p.nudge = -p.nudge;
     }
   }
-  card(p, ev, dur);
+  card(p, ev, dur, col);
 }
 
 // tarjeta tipo notificación (titular + subtítulo) con alarma y flash
-function card(p, ev, dur) {
+function card(p, ev, dur, col = EV_COL.slack) {
+  p.evc = col;
   for (const [t, s] of [[p.evT, '!! ' + ev[0] + ' !!'], [p.subT, ev[1]]]) {
     sc.tweens.killTweensOf(t);
     t.setText(s).setAlpha(1).setScale(1.2);
@@ -728,7 +772,7 @@ function card(p, ev, dur) {
     sc.tweens.add({ targets: t, alpha: 0, delay: dur, duration: 400 });
   }
   SFX.alarm();
-  flash(p, 0xff9a3c, 0.35);
+  flash(p, col, 0.35);
 }
 
 function msg(p, s, col, big) {
@@ -812,7 +856,7 @@ function upd(p, dt) {
       p.v *= 0.2;
       p.s *= 0.4;
       for (const f of p.floors) f.ox *= 0.7;
-      msg(p, 'REFACTOR!', '#f7ffd8');
+      msg(p, TXT.rf, '#f7ffd8');
       SFX.refactor();
       flash(p, C.lime, 0.3);
       ring(p, p.tx, p.ty);
@@ -856,7 +900,7 @@ function upd(p, dt) {
   if (gi > 1 && S.el >= (p.grace || 0)) {
     if (p.lives <= 1) return die(p, TXT.over);
     topple(p, cut, Math.sign(p.s) || 1);
-    msg(p, TXT.over + '\n-1 CAFÉ', '#f7ffd8', 1);
+    msg(p, TXT.over + '\n' + TXT.minus, '#f7ffd8', 1);
     if (p.dead) return;
   }
 
@@ -915,7 +959,7 @@ function land(p, c, tf) {
     p.lives--;
     p.shake = 8;
     flash(p, RISK_COL, 0.4);
-    msg(p, say(TXT.cae, 'cae') + '\n-1 CAFÉ', '#f7ffd8');
+    msg(p, say(TXT.cae, 'cae') + '\n' + TXT.minus, '#f7ffd8');
     SFX.slip();
     if (p.lives <= 0) return die(p, TXT.nocafe);
     p.next = S.el + 450;
@@ -924,7 +968,7 @@ function land(p, c, tf) {
   const perf = Math.abs(dx) <= PERF_PX * p.k;
   const y0 = topH(p);
   p.floors.push({
-    name: c.name, w: c.w, h: c.h, wt: c.wt, col: c.col, t: c.t,
+    name: c.name, w: c.w, h: c.h, wt: c.wt, col: c.col, bc: c.bc, bw: c.bw, t: c.t,
     y: y0, ox: perf ? 0 : dx / Math.cos(p.ta), sq: 1,
   });
   // polvo en las esquinas + "golpe" de cámara
@@ -933,9 +977,9 @@ function land(p, c, tf) {
     if (c.name === TXT.cafe[0]) p.lives = Math.min(3, p.lives + 1);
     else p.rf = 0; // pair programming: refactor listo
     SFX.mile();
-    burst(p, lx, y0 + c.h, 24, [0xffd84d, C.white], 260, true);
+    burst(p, lx, y0 + c.h, 24, [PW_COL, C.white], 260, true);
   }
-  for (const sx of [-1, 1]) burst(p, lx + (sx * c.w) / 2, y0, 5, [C.lime3, C.lime2], 110, true);
+  for (const sx of [-1, 1]) burst(p, lx + (sx * c.w) / 2, y0, 5, [c.col, 0x8a8f9e], 110, true);
   p.kick = Math.max(p.kick, 3);
   p.v += dx * 0.8;
   p.combo = perf ? p.combo + 1 : 0;
@@ -946,27 +990,27 @@ function land(p, c, tf) {
   pop(p, lx, y0 + c.h + 10, '+' + pts, perf ? TXT.perfCol[mult - 1] : '#f7ffd8');
   if (perf) {
     p.perf++;
-    msg(p, c.pw || `${say(TXT.perf[mult - 1], 'perf')}\nx${mult}`, c.pw ? '#ffd84d' : TXT.perfCol[mult - 1], 1);
+    msg(p, c.pw || `${say(TXT.perf[mult - 1], 'perf')}\nx${mult}`, c.pw ? '#ffc61a' : TXT.perfCol[mult - 1], 1);
     SFX.perf(p.combo);
-    burst(p, lx, y0 + c.h, 10 + mult * 4, [C.lime, C.white, 0xffd84d], 200 + mult * 30, true);
+    burst(p, lx, y0 + c.h, 10 + mult * 4, [C.lime, C.white, c.col], 200 + mult * 30, true);
     ring(p, lx, y0 + c.h / 2);
     flash(p, C.white, 0.2 + mult * 0.05);
     p.kick = 5;
     // sabotaje 2P: no se acumula si el rival ya está temblando
     const o = S.P[1 - p.i];
-    if (S.n > 1 && S.el >= o.qu) quake(o, RIVAL_Q, 1800, say(TXT.rival, 'rival'));
+    if (S.n > 1 && S.el >= o.qu) quake(o, RIVAL_Q, 1800, say(TXT.rival, 'rival'), EV_COL.rival);
   } else {
     const k = Math.abs(dx) <= CASI_PX * p.k ? 'casi' : ov < 0.6 * c.w ? 'pelo' : 'normal';
-    msg(p, c.pw || say(TXT[k], k), c.pw ? '#ffd84d' : '#f7ffd8', !!c.pw);
+    msg(p, c.pw || say(TXT[k], k), c.pw ? '#ffc61a' : '#f7ffd8', !!c.pw);
     SFX.land();
   }
   // hito cada 10 pisos (la primera vez que se alcanza)
   const nf = p.floors.length - 1;
   if (nf % 10 === 0 && nf > p.maxH) {
-    msg(p, TXT.mile[nf] || `¡${nf} PISOS!`, '#ffd84d', 1);
+    msg(p, TXT.mile[nf] || `${nf} pisos.`, '#e1ff00', 1);
     SFX.mile();
     flash(p, C.lime, 0.5);
-    for (const sx of [-1, 1]) burst(p, lx + sx * 60, y0, 25, [C.lime, 0xffd84d, C.white], 340, true);
+    for (const sx of [-1, 1]) burst(p, lx + sx * 60, y0, 25, [C.lime, ...CAT.front, ...CAT.back], 340, true);
   }
   p.maxH = Math.max(p.maxH, nf);
   p.next = S.el + 250;
@@ -1069,7 +1113,7 @@ function hud() {
   }
 }
 
-function slab(g, x, y, w, h, a, col, al = 1) {
+function slab(g, x, y, w, h, a, col, al = 1, bc = C.ink, bw = 2) {
   const c = Math.cos(a);
   const s = Math.sin(a);
   const pts = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]].map(([u, v]) => ({
@@ -1078,7 +1122,7 @@ function slab(g, x, y, w, h, a, col, al = 1) {
   }));
   g.fillStyle(col, al);
   g.fillPoints(pts, true);
-  g.lineStyle(2, C.ink, al);
+  g.lineStyle(bw, bc, al);
   g.strokePoints(pts, true);
 }
 
@@ -1101,21 +1145,41 @@ function drawP(p, g, bg) {
   const x0 = p.cx - p.vw / 2;
   const SY = (y) => GY - (y - p.cam) + oy;
 
+  // cielo según la hora: degradé en bandas + estrellas de noche
+  const [top, hor, st] = sky(S.dd ? END_H : hour());
+  for (let i = 0; i < 10; i++) {
+    bg.fillStyle(mix(top, hor, i / 9), 1);
+    bg.fillRect(x0, i * 60, p.vw, 60);
+  }
+  if (st > 0.02) {
+    for (let i = 0; i < 28; i++) {
+      bg.fillStyle(0xffffff, st * (0.4 + 0.6 * ((i * 7) % 5) / 4));
+      bg.fillRect(x0 + ((i * 137) % p.vw), (i * 89 + p.cam * 0.15) % (H - 60), 2, 2);
+    }
+  }
+  // Demo Day: focos sobre la torre
+  if (S.dd) {
+    const sw = Math.sin(S.el / 700) * 50;
+    for (const [fx, d] of [[x0 + 30, 1], [x0 + p.vw - 30, -1]]) {
+      bg.fillStyle(0xffffff, 0.07);
+      bg.fillTriangle(fx, 0, p.cx + d * sw - 70, GY, p.cx + d * sw + 70, GY);
+    }
+  }
   // rejilla de fondo (sube con la cámara)
-  bg.lineStyle(1, C.lime, 0.07);
+  bg.lineStyle(1, 0xffffff, 0.04);
   for (let y = Math.floor(p.cam / 40) * 40; SY(y) > -40; y += 40) bg.lineBetween(x0, SY(y), x0 + p.vw, SY(y));
   // suelo
-  bg.fillStyle(C.dark, 1);
+  bg.fillStyle(0x0d0f14, 1);
   bg.fillRect(x0, SY(0), p.vw, H);
   bg.fillStyle(C.lime, 0.5);
   bg.fillRect(x0, SY(0), p.vw, 2);
   // marcas de altura cada 5 pisos
   for (let n = 5; n <= p.maxH + 5; n += 5) {
     const y = SY(n * FH * p.k);
-    if (!p.mk[n]) sc.bgrp.add((p.mk[n] = txt(0, 0, n + '', 11, '#5d6e12').setOrigin(0, 1)));
+    if (!p.mk[n]) sc.bgrp.add((p.mk[n] = txt(0, 0, n + '', 11, '#6b7390').setOrigin(0, 1)));
     const m = p.mk[n];
     m.setPosition(x0 + 6, y - 2).setVisible(y > ROPE_Y && y < H);
-    bg.fillStyle(C.lime, 0.1);
+    bg.fillStyle(0xffffff, 0.07);
     bg.fillRect(x0, y, p.vw, 1);
   }
 
@@ -1123,7 +1187,7 @@ function drawP(p, g, bg) {
   for (const f of p.fall) {
     const x = ox + f.x;
     const y = SY(f.y + f.h / 2);
-    slab(bg, x, y, f.w, f.h, f.a, f.col, f.al);
+    slab(bg, x, y, f.w, f.h, f.a, f.col, f.al, f.bc, f.bw);
     f.t.setPosition(x, y).setRotation(f.a).setAlpha(f.al);
   }
 
@@ -1134,7 +1198,14 @@ function drawP(p, g, bg) {
     const x = ox + f.cx + (rk > RISK_SHOW ? (Math.random() - 0.5) * rk * 6 : 0);
     const y = SY(f.cy);
     const q = f.sq || 0; // squash al aterrizar
-    slab(g, x, y + q * 3, f.w * (1 + 0.1 * q), f.h * (1 - 0.25 * q), f.a, rk > RISK_SHOW ? mix(f.col, RISK_COL, 0.2 + ((rk - RISK_SHOW) / (1 - RISK_SHOW)) * 0.8) : f.col, p.dead ? 0.35 : 1);
+    const rr = rk > RISK_SHOW ? (rk - RISK_SHOW) / (1 - RISK_SHOW) : 0;
+    // en riesgo: tinte rojo + borde rojo que parpadea más rápido cuanto mayor el riesgo
+    const blink = rr && Math.sin(S.el / (120 - rr * 70)) > -0.2;
+    slab(
+      g, x, y + q * 3, f.w * (1 + 0.1 * q), f.h * (1 - 0.25 * q), f.a,
+      rr ? mix(f.col, RISK_COL, 0.15 + rr * 0.55) : f.col, p.dead ? 0.35 : 1,
+      blink ? RISK_BORDER : f.bc, blink ? 3 : f.bw,
+    );
     f.t.setPosition(x, y + q * 3).setRotation(f.a).setAlpha(p.dead ? 0.35 : 1).setScale(1 + 0.1 * q, 1 - 0.25 * q);
   }
 
@@ -1153,10 +1224,10 @@ function drawP(p, g, bg) {
     }
     if (p.combo > 1 || c.pw) {
       // racha de perfectos o power-up: el piso colgando brilla
-      g.lineStyle(3, 0xffd84d, 0.5 + 0.4 * Math.sin(S.el / 70));
+      g.lineStyle(3, c.pw ? PW_COL : C.lime, 0.5 + 0.4 * Math.sin(S.el / 70));
       g.strokeRect(x - c.w / 2 - 5, y - c.h / 2 - 5, c.w + 10, c.h + 10);
     }
-    slab(g, x, y, c.w, c.h, 0, c.col);
+    slab(g, x, y, c.w, c.h, 0, c.col, 1, c.bc, c.bw);
     c.t.setPosition(x, y).setRotation(0).setAlpha(1);
   } else if (c) c.t.setAlpha(0);
 
@@ -1175,7 +1246,7 @@ function drawP(p, g, bg) {
     const eh = p.subT.y + p.subT.height - 58 + 8;
     g.fillStyle(C.ink, 0.88 * ea);
     g.fillRect(x0 + 14, 58, p.vw - 28, eh);
-    g.fillStyle(0xff9a3c, ea);
+    g.fillStyle(p.evc || EV_COL.slack, ea);
     g.fillRect(x0 + 14, 58, 5, eh);
   }
 
