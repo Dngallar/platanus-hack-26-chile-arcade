@@ -15,6 +15,8 @@ const ROPE_Y = 196; // riel de la grúa (bajo el HUD y los mensajes)
 const HANG = 150; // altura del piso colgando sobre el tope
 const RISK_M = 0.4; // margen Jenga bajo el cual se avisa (tinte rojo + vibración + crujido)
 const RISK_COL = 0xff4a1c;
+const MIN_FONT = 11; // tamaño mínimo del nombre de un piso
+const TX = 545; // columna de texto del título (la torre demo va a la izquierda)
 
 // DO NOT replace existing keys — they match the physical arcade cabinet wiring.
 // To add local testing shortcuts, append extra keys to any array.
@@ -247,20 +249,23 @@ function create() {
   sc.go.add([sc.add.rectangle(W / 2, H / 2, W, H, C.bg, 0.88), sc.goTitle, sc.goWhy, sc.goTab, sc.goStart, sc.goIdle]);
 
   // pantalla de título (sobre la torre demo del attract mode)
+  // la torre demo se arma a la izquierda; todo el texto va en una columna
+  // derecha con fondo oscuro propio, así siempre se lee
   sc.ti = sc.add.container(0, 0);
-  sc.tiTitle = txt(W / 2, 92, 'MVP EN 36 HORAS', 56).setOrigin(0.5);
-  sc.tiPanelBg = sc.add.rectangle(W / 2, 300, 540, 200, C.bg, 0.82).setStrokeStyle(2, C.lime3);
-  sc.tiPanel = txt(W / 2, 300, '', 17, '#f7ffd8').setOrigin(0.5).setLineSpacing(4);
-  sc.tiPress = txt(W / 2, 455, 'PRESIONA START', 30).setOrigin(0.5);
+  sc.tiTitle = txt(TX, 68, 'MVP EN 36 HORAS', 46).setOrigin(0.5);
+  sc.tiPanelBg = sc.add.rectangle(TX, 290, 440, 200, C.ink, 0.95).setStrokeStyle(2, C.lime3);
+  sc.tiPanel = txt(TX, 290, '', 17, '#f7ffd8').setOrigin(0.5).setLineSpacing(4);
+  sc.tiPress = txt(TX, 450, 'PRESIONA START', 32).setOrigin(0.5);
   sc.ti.add([
-    sc.add.rectangle(W / 2, H / 2, W, H, C.bg, 0.45),
+    sc.add.rectangle(W / 2, H / 2, W, H, C.bg, 0.25),
+    sc.add.rectangle(TX, H / 2, 490, H - 20, C.bg, 0.86).setStrokeStyle(2, C.lime3),
     sc.tiTitle,
-    txt(W / 2, 140, TXT.sub, 16, '#a8c700').setOrigin(0.5),
+    txt(TX, 110, TXT.sub, 16, '#a8c700').setOrigin(0.5),
     sc.tiPanelBg,
     sc.tiPanel,
     sc.tiPress,
-    txt(W / 2, 495, 'START1: 1 JUGADOR   ·   START2: 2 JUGADORES', 15, '#f7ffd8').setOrigin(0.5),
-    txt(W / 2, 572, TXT.tag, 13, '#a8c700').setOrigin(0.5),
+    txt(TX, 492, 'START1: 1 JUGADOR   ·   START2: 2 JUGADORES', 15, '#f7ffd8').setOrigin(0.5),
+    txt(TX, 552, TXT.tag, 13, '#a8c700').setOrigin(0.5).setWordWrapWidth(450),
   ]);
   sc.tweens.add({ targets: sc.tiPress, alpha: 0.15, duration: 500, yoyo: true, repeat: -1 });
   sc.tweens.add({ targets: sc.tiTitle, scale: 1.04, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
@@ -286,6 +291,8 @@ function newDemo() {
   const d = mkPlayer(0, 1);
   d.ai = true;
   d.id = 'AI';
+  d.cx = 150; // a la izquierda, fuera de la columna de texto
+  d.vw = 300;
   for (const t of [d.hud, d.msgT, d.evT, d.subT]) t.setVisible(false);
   S.P = [d];
 }
@@ -300,7 +307,7 @@ function showPanel(i) {
   S.pi = i % TXT.panels.length;
   S.pt = sc.time.now + 5500;
   sc.tiPanel.setText(TXT.panels[S.pi]).setAlpha(0);
-  sc.tiPanelBg.setSize(Math.max(420, sc.tiPanel.width + 50), sc.tiPanel.height + 36);
+  sc.tiPanelBg.setSize(Math.max(420, sc.tiPanel.width + 40), sc.tiPanel.height + 36).setOrigin(0.5);
   sc.tweens.add({ targets: sc.tiPanel, alpha: 1, duration: 300 });
 }
 
@@ -310,8 +317,8 @@ function titleFrame(time, dt) {
   const d = S.P[0];
   upd(d, dt);
   // el título tiembla con la torre demo
-  sc.tiTitle.setPosition(W / 2 + (Math.random() - 0.5) * d.shake, 92 + (Math.random() - 0.5) * d.shake * 0.5);
-  if ((d.dead && !d.fall.length) || d.floors.length > 16 || hour() > 30) newDemo();
+  sc.tiTitle.setPosition(TX + (Math.random() - 0.5) * d.shake, 68 + (Math.random() - 0.5) * d.shake * 0.5);
+  if ((d.dead && !d.fall.length) || d.floors.length > 16 || hour() > 20) newDemo();
   if (time >= S.pt) showPanel(S.pi + 1);
 }
 
@@ -431,9 +438,11 @@ function mkPlayer(i, n) {
   return p;
 }
 
+// Texto del piso con tamaño mínimo legible (MIN_FONT). Si el nombre no cabe,
+// el piso se ensancha para el texto; ese ancho es el que usa la física.
 function floorText(f, col) {
-  const t = txt(0, 0, f.name, Math.round(13 * (f.h / FH)), col || '#0b0f03').setOrigin(0.5);
-  t.setScale(Math.min(1, (f.w - 8) / t.width));
+  const t = txt(0, 0, f.name, Math.max(MIN_FONT, Math.round(13 * (f.h / FH))), col || '#0b0f03').setOrigin(0.5);
+  f.w = Math.max(f.w, t.width + 10);
   sc.grp.addAt(t, 0);
   return t;
 }
@@ -760,7 +769,7 @@ function update(time, delta) {
         S.ai++;
         sc.tweens.killTweensOf([sc.tick, sc.tickBg]);
         sc.tick.setText('> ' + am[1]).setAlpha(1);
-        sc.tickBg.setSize(sc.tick.width + 24, 26).setAlpha(1);
+        sc.tickBg.setSize(sc.tick.width + 24, 26).setOrigin(0.5).setAlpha(1);
         sc.tweens.add({ targets: [sc.tick, sc.tickBg], alpha: 0, delay: 4000, duration: 600 });
       }
     }
