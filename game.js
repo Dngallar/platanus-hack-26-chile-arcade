@@ -8,6 +8,7 @@ const FH = 26; // alto de un piso
 const HOUR_MS = 4200; // 1 hora de hackathon = 4.2 s
 const END_H = 36;
 const LIM = 110; // desplazamiento máximo de la punta antes de colapsar
+const SUPPORT = 0.35; // fracción mínima del ancho que debe apoyarse al aterrizar
 
 // DO NOT replace existing keys — they match the physical arcade cabinet wiring.
 // To add local testing shortcuts, append extra keys to any array.
@@ -73,10 +74,74 @@ const CREEP = [
   ['UBER DE EMPANADAS', 160, 1.4], ['SUPERAPP', 70, 2.2], ['TINDER DE COFOUNDERS', 160, 1.3],
   ['IA EN EL LOGIN', 80, 1.6],
 ];
-const EVENTS = [
-  'MERGE CONFLICT', 'SE CAYÓ LA API', 'WIFI CAÍDA', 'MENTOR: ¡PIVOTEEN!',
-  'SE ACABÓ EL CAFÉ', 'DEPLOY A LAS 4AM', 'NPM INSTALL INFINITO',
-];
+
+// ===== TODOS LOS TEXTOS DEL JUEGO (editar aquí) =====
+const TXT = {
+  // Piso perfecto: un grupo por nivel de combo (x1 .. x5)
+  perf: [
+    ['¡MERGEADO SIN CONFLICTOS!', '¡PASA TODOS LOS TESTS!', '¡CLEAN CODE!'],
+    ['¡DEPLOY EN VERDE!', '¡LGTM, SHIP IT!', '¡LA RAJA!'],
+    ['¡PRODUCT-MARKET FIT!', '¡PULENTO!', '¡CERO WARNINGS!'],
+    ['¡10X ENGINEER!', '¡LOS JUECES TOMAN NOTA!', '¡BACÁN, COMPADRE!'],
+    ['¡ESTO ES UNICORNIO!', '¡IPO EN 36 HORAS!', '¡TE LLAMA SILICON VALLEY!'],
+  ],
+  // Casi perfecto (a pocos píxeles)
+  casi: ['¡CASI PERFECTO!', 'LE FALTÓ UN PIXEL', 'LGTM (CASI)', '¡ESO, ESO, ESO!'],
+  // Aterrizó apenas apoyado
+  pelo: ['¡POR UN PELO!', 'COLGANDO DE UN HILO', 'FUNCIONA EN MI MÁQUINA', '¡AGÁRRATE, CATALINA!'],
+  // Piso normal
+  normal: [
+    'SHIPPEADO', 'OTRA FEATURE MÁS', 'MERGEADO A LA RÁPIDA', 'SIN CODE REVIEW',
+    'EN LOCALHOST SE VE BIEN', 'COMMIT: "fix"', 'DALE NOMÁS', 'YA, SIRVE',
+  ],
+  // El piso no se apoya y se cae
+  cae: [
+    '¡NO COMPILA!', 'ESO ERA DEUDA TÉCNICA', '404: FEATURE NOT FOUND', '¡CHUTA!',
+    'SE FUE A PRODUCCIÓN... Y AL SUELO', 'ROLLBACK', '¡QUÉ FOME!',
+  ],
+  // Derrumbe parcial (regla Jenga)
+  derr: [
+    '¡SE DERRUMBÓ EL BACKEND!', 'GIT RESET --HARD', 'LA DEUDA TÉCNICA COBRA INTERESES',
+    '¡QUEDÓ LA ESCOBA!', 'ESTO NO ESCALA', 'REFACTORIZAR ERA OPCIONAL, DIJERON',
+  ],
+  // Fin de partida
+  over: ['¡COLAPSÓ EL MVP!', 'EL MVP SE FUE A NEGRO', 'PIVOTEANDO A CONSULTORA...'],
+  nocafe: ['¡SIN CAFÉ!', 'SE ACABÓ EL CAFÉ... Y LAS GANAS', 'MODO ZOMBI: OFF'],
+  // Eventos (temblores): [titular, subtítulo estilo Slack]
+  ev: [
+    ['MERGE CONFLICT', '#dev — "¿quién pusheó directo a main?"'],
+    ['SE CAYÓ LA API', '#general — "¿alguien tiene otra API key?"'],
+    ['WIFI CAÍDA', '#random — "¿alguien comparte datos?"'],
+    ['PASÓ EL MENTOR', '#general — el mentor: "¿y si lo hacen B2B?"'],
+    ['¡PIVOTEEN!', '#anuncios — "ahora es una app de citas para mascotas"'],
+    ['SE ACABÓ EL CAFÉ', '#random — "quedan puros sobres de té"'],
+    ['NPM INSTALL', '#dev — "lleva 40 minutos... y sigue"'],
+    ['DEPLOY A LAS 4AM', '#dev — "un deploy chiquitito nomás"'],
+    ['CORTE DE LUZ', '#general — "¿alguien guardó?"'],
+    ['TEMBLOR DE VERDAD', '#random — "tranqui, fue un 5,8 nomás"'],
+  ],
+  // Temblor enviado por el rival (2P)
+  rival: [
+    ['TU RIVAL SHIPPEÓ', '#general — "¿vieron el demo del equipo de al lado?"'],
+    ['EL OTRO EQUIPO TIENE TRACCIÓN', '#random — "dicen que ya tienen 3 usuarios"'],
+    ['TU RIVAL LEVANTÓ RONDA', '#general — "pre-seed de 2 empanadas"'],
+  ],
+  // Ambiente según la hora: [hora, comentario]
+  amb: [
+    [1, 'alguien ya está pidiendo pizza'],
+    [3, '3 AM: alguien pidió otra pizza'],
+    [6, 'amanece. nadie ha dormido'],
+    [9, 'llegó el desayuno: puras sopaipillas'],
+    [12, 'mediodía: "¿y si le agregamos IA?"'],
+    [16, 'alguien se durmió en un puff'],
+    [20, 'el café ya sabe a tierra'],
+    [24, '24 horas y el repo tiene 3 commits'],
+    [27, '3 AM otra vez. queda pura fe'],
+    [30, 'los jueces ya llegaron'],
+    [33, 'alguien ensaya el pitch en el baño'],
+    [35, '"¿quién hizo las slides?" ... silencio'],
+  ],
+};
 
 const config = {
   type: Phaser.AUTO,
@@ -93,11 +158,21 @@ new Phaser.Game(config);
 let sc; // escena
 let S; // estado de partida
 const CTL = { held: Object.create(null), pressed: Object.create(null) };
+const LAST = {}; // último texto mostrado por categoría (para no repetir)
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rnd = (a, b) => a + Math.random() * (b - a);
 const pick = (a) => a[(Math.random() * a.length) | 0];
 const hour = () => S.el / HOUR_MS;
+
+// elige un texto al azar sin repetir el anterior de la misma categoría
+function say(arr, key) {
+  let s;
+  do s = pick(arr);
+  while (arr.length > 1 && s === LAST[key]);
+  LAST[key] = s;
+  return s;
+}
 
 function prs(code) {
   if (CTL.pressed[code]) {
@@ -130,6 +205,7 @@ function create() {
   sc.grp = sc.add.container(0, 0);
   sc.hg = sc.add.graphics();
   sc.clock = txt(W / 2, 10, '', 18).setOrigin(0.5, 0);
+  sc.tick = txt(W / 2, H - 22, '', 13, '#a8c700').setOrigin(0.5);
   sc.big = txt(W / 2, H / 2, '', 22).setOrigin(0.5).setLineSpacing(8);
   toMenu();
 }
@@ -142,6 +218,7 @@ function toMenu() {
   sc.hg.clear();
   S = { ph: 'menu', P: [], el: 0, lock: 0 };
   sc.clock.setText('');
+  sc.tick.setText('');
   sc.big.setText(
     'MVP EN 36 HORAS\n\n' +
       'ENTER / START1 : 1 JUGADOR\n2 / START2 : 2 JUGADORES\n\n' +
@@ -152,7 +229,7 @@ function toMenu() {
 function start(n) {
   sc.grp.removeAll(true);
   sc.big.setText('');
-  S = { ph: 'play', P: [], n, el: 0, ne: 3 * HOUR_MS + 2000, lock: 0 };
+  S = { ph: 'play', P: [], n, el: 0, ne: 3 * HOUR_MS + 2000, lock: 0, ai: 0 };
   for (let i = 0; i < n; i++) S.P.push(mkPlayer(i, n));
   tone(440, 0.1, 'square', 0.08, 880);
 }
@@ -193,12 +270,14 @@ function mkPlayer(i, n) {
   };
   const x0 = p.cx - p.vw / 2;
   p.hud = txt(x0 + 12, 36, '', 15).setOrigin(0, 0).setAlign('left');
-  p.msgT = txt(p.cx, 250, '', 22).setOrigin(0.5).setAlpha(0);
-  p.evT = txt(p.cx, 110, '', 20, '#f7ffd8').setOrigin(0.5).setAlpha(0);
-  sc.grp.add([p.hud, p.msgT, p.evT]);
+  p.msgT = txt(p.cx, 290, '', 20).setOrigin(0.5).setAlpha(0).setWordWrapWidth(p.vw - 30);
+  p.evT = txt(p.cx, 215, '', 20, '#f7ffd8').setOrigin(0.5).setAlpha(0).setWordWrapWidth(p.vw - 30);
+  p.subT = txt(p.cx, 245, '', 12, '#a8c700').setOrigin(0.5).setAlpha(0).setWordWrapWidth(p.vw - 30);
+  sc.grp.add([p.hud, p.msgT, p.evT, p.subT]);
   const base = { name: 'IDEA', w: 170 * k, h: FH * k, wt: 3, col: C.lime3, ox: 0, y: 0 };
   base.t = floorText(base, '#e1ff00');
   p.floors.push(base);
+  chain(p);
   return p;
 }
 
@@ -209,38 +288,108 @@ function floorText(f, col) {
   return t;
 }
 
+// altura (sin balanceo) del tope de la torre
 const topH = (p) => {
   const f = p.floors[p.floors.length - 1];
   return f.y + f.h;
 };
-// desplazamiento lateral por balanceo a altura y (curva cuadrática)
-const bend = (p, y) => {
-  const t = Math.max(topH(p), 60);
-  return p.s * (y / t) * (y / t);
-};
+
+// Calcula la torre como cadena: cada piso se apoya en el borde superior del
+// anterior, desplazado por su offset (f.ox) y rotado por el ángulo acumulado.
+// Coordenadas de mundo: x relativo al centro, y hacia arriba.
+function chain(p) {
+  const Ht = Math.max(topH(p), 60);
+  const th = (2 * p.s) / Ht; // ángulo en la punta (curva cuadrática)
+  let X = 0;
+  let px = 0;
+  let py = 0;
+  let pa = 0;
+  p.floors.forEach((f, i) => {
+    X += f.ox;
+    f.X = X; // centro sin balanceo
+    const a = i ? (th * (f.y + f.h / 2)) / Ht : 0;
+    const bx = px + f.ox * Math.cos(pa);
+    const by = py - f.ox * Math.sin(pa);
+    f.a = a;
+    f.cx = bx + (f.h / 2) * Math.sin(a);
+    f.cy = by + (f.h / 2) * Math.cos(a);
+    px = bx + f.h * Math.sin(a);
+    py = by + f.h * Math.cos(a);
+    pa = a;
+  });
+  p.tx = px; // centro del borde superior del último piso
+  p.ty = py;
+  p.ta = pa;
+}
+
+// Regla Jenga: el centro de masa de los pisos i..tope debe caer sobre el piso i-1.
+function jenga(p) {
+  const F = p.floors;
+  let sw = 0;
+  let sx = 0;
+  let fail = 0;
+  let dir = 0;
+  for (let i = F.length - 1; i > 0; i--) {
+    sw += F[i].wt;
+    sx += F[i].wt * F[i].cx;
+    const b = F[i - 1];
+    const sup = b.cx + (b.h / 2) * Math.sin(b.a);
+    const d = sx / sw - sup;
+    if (Math.abs(d) > (b.w / 2) * Math.cos(b.a) + 4 * p.k) {
+      fail = i; // nos quedamos con la falla más baja
+      dir = Math.sign(d);
+    }
+  }
+  if (fail) topple(p, fail, dir);
+}
+
+// Todo lo que está sobre el piso i-1 se vuelca y cae.
+function topple(p, i, dir) {
+  const n = p.floors.length - i;
+  for (const f of p.floors.splice(i)) toFall(p, f, dir);
+  p.s *= 0.3;
+  p.v *= 0.3;
+  p.combo = 0;
+  p.lives--;
+  p.shake = 10 + n * 2;
+  msg(p, say(n > 1 ? TXT.derr : TXT.cae, n > 1 ? 'derr' : 'cae') + '\n-1 CAFÉ', '#f7ffd8');
+  tone(160, 0.5, 'sawtooth', 0.12, 50);
+  chain(p);
+  if (p.lives <= 0) die(p, say(TXT.nocafe, 'nocafe'));
+}
+
+function toFall(p, f, dir) {
+  p.fall.push({
+    ...f, x: f.cx, y: f.cy - f.h / 2, a: f.a,
+    va: dir * rnd(1.5, 4), vx: dir * rnd(60, 180), vy: rnd(0, 150),
+  });
+}
 
 function spawnCur(p) {
   const h = hour();
   const creep = clamp((h - 8) / 20, 0, 0.7);
-  const d = Math.random() < creep ? pick(CREEP) : pick(FEATS);
+  const isCreep = Math.random() < creep;
+  const d = isCreep ? pick(CREEP) : pick(FEATS);
   const c = {
     name: d[0], w: d[1] * p.k, h: FH * p.k, wt: d[2],
-    col: Math.random() < creep ? C.white : pick(FLOOR_COLS),
+    col: isCreep ? C.white : pick(FLOOR_COLS),
     x: 0, y: topH(p) + 170, vy: 0, st: 'hang',
   };
   c.t = floorText(c);
   p.cur = c;
 }
 
-function quake(p, m, dur, label) {
+function quake(p, m, dur, ev) {
   if (p.dead) return;
   p.qm = Math.max(S.el < p.qu ? p.qm : 0, m);
   p.qu = S.el + dur;
   p.qp = Math.random() * 6;
-  p.evT.setText('!! ' + label + ' !!').setAlpha(1).setScale(1.3);
-  sc.tweens.killTweensOf(p.evT);
-  sc.tweens.add({ targets: p.evT, scale: 1, duration: 200 });
-  sc.tweens.add({ targets: p.evT, alpha: 0, delay: dur - 300, duration: 300 });
+  for (const [t, s] of [[p.evT, '!! ' + ev[0] + ' !!'], [p.subT, ev[1]]]) {
+    sc.tweens.killTweensOf(t);
+    t.setText(s).setAlpha(1).setScale(1.2);
+    sc.tweens.add({ targets: t, scale: 1, duration: 200 });
+    sc.tweens.add({ targets: t, alpha: 0, delay: dur, duration: 400 });
+  }
   tone(220, 0.35, 'sawtooth', 0.08, 110);
 }
 
@@ -249,11 +398,11 @@ function msg(p, s, col) {
   sc.tweens.killTweensOf(t);
   t.setText(s).setColor(col || '#e1ff00').setAlpha(1).setScale(1.4);
   sc.tweens.add({ targets: t, scale: 1, duration: 150 });
-  sc.tweens.add({ targets: t, alpha: 0, delay: 700, duration: 400 });
+  sc.tweens.add({ targets: t, alpha: 0, delay: 800, duration: 400 });
 }
 
 function upd(p, dt) {
-  // piezas cayendo (fallos y colapso)
+  // piezas cayendo (fallos y derrumbes)
   for (let i = p.fall.length; i--; ) {
     const f = p.fall[i];
     f.vy -= 1800 * dt;
@@ -270,8 +419,6 @@ function upd(p, dt) {
 
   const h = hour();
   const n = p.floors.length;
-  const top = topH(p);
-  const tf = p.floors[n - 1];
 
   // joystick: ajusta el centro de la grúa
   const dir = (CTL.held[p.id + '_R'] ? 1 : 0) - (CTL.held[p.id + '_L'] ? 1 : 0);
@@ -289,12 +436,12 @@ function upd(p, dt) {
     } else tone(120, 0.08, 'square', 0.05);
   }
 
-  // balanceo: resorte-amortiguador + desbalance + temblor
+  // balanceo global: resorte-amortiguador + desbalance + temblor
   let sw = 0;
   let sx = 0;
   for (const f of p.floors) {
     sw += f.wt;
-    sx += f.wt * f.ox;
+    sx += f.wt * f.X;
   }
   p.com = sx / sw;
   const ks = 9 / (1 + n * 0.05);
@@ -307,7 +454,14 @@ function upd(p, dt) {
   const a = -ks * (p.s - 2.4 * p.com) - 1.1 * p.v + F;
   p.v += a * dt;
   p.s += p.v * dt;
-  if (Math.abs(p.s) > LIM * p.k) return die(p, '¡COLAPSÓ EL MVP!');
+  if (Math.abs(p.s) > LIM * p.k) return die(p, say(TXT.over, 'over'));
+
+  chain(p);
+  jenga(p);
+  if (p.dead) return;
+
+  const top = topH(p);
+  const tf = p.floors[p.floors.length - 1];
 
   // cámara
   p.cam += (Math.max(0, top - 230) - p.cam) * Math.min(1, dt * 4);
@@ -318,7 +472,7 @@ function upd(p, dt) {
   if (!c) return;
   if (c.st === 'hang') {
     p.ph += dt * (1.4 + h * 0.05);
-    c.x = tf.ox + p.nudge + Math.sin(p.ph) * (60 + h * 2.2) * p.k;
+    c.x = tf.X + p.nudge + Math.sin(p.ph) * (60 + h * 2.2) * p.k;
     c.y = top + 170;
     if (prs(p.id + '_1')) {
       c.st = 'drop';
@@ -327,46 +481,51 @@ function upd(p, dt) {
   } else {
     c.vy += 2400 * dt;
     c.y -= c.vy * dt;
-    if (c.y <= top) land(p, c, top, tf);
+    if (c.y <= p.ty) land(p, c, tf);
   }
 }
 
-function land(p, c, top, tf) {
-  const tx = tf.ox + bend(p, top);
-  const dx = c.x - tx;
-  if (Math.abs(dx) > ((tf.w + c.w) / 2) * 0.8) {
-    // no aterriza: se cae al vacío
-    p.fall.push({ ...c, a: 0, va: dx > 0 ? 3 : -3, vx: dx > 0 ? 80 : -80, vy: -c.vy * 0.3 });
-    p.cur = null;
+function land(p, c, tf) {
+  const tw = tf.w * Math.cos(p.ta);
+  const dx = c.x - p.tx;
+  const ov = Math.min(c.x + c.w / 2, p.tx + tw / 2) - Math.max(c.x - c.w / 2, p.tx - tw / 2);
+  p.cur = null;
+  if (ov < SUPPORT * c.w) {
+    // no se apoya lo suficiente: resbala y cae
+    const d = Math.sign(dx) || 1;
+    p.fall.push({ ...c, a: 0, va: d * 3, vx: d * 90, vy: -c.vy * 0.3 });
     p.combo = 0;
     p.lives--;
     p.shake = 8;
-    msg(p, '¡NO COMPILA!\n-1 CAFÉ', '#f7ffd8');
+    msg(p, say(TXT.cae, 'cae') + '\n-1 CAFÉ', '#f7ffd8');
     tone(200, 0.3, 'sawtooth', 0.1, 60);
-    if (p.lives <= 0) return die(p, '¡SIN CAFÉ!');
+    if (p.lives <= 0) return die(p, say(TXT.nocafe, 'nocafe'));
     p.next = S.el + 450;
     return;
   }
   const perf = Math.abs(dx) <= 5 * p.k;
-  const f = { name: c.name, w: c.w, h: c.h, wt: c.wt, col: c.col, t: c.t, y: top };
-  f.ox = perf ? tf.ox : c.x - bend(p, top);
-  p.floors.push(f);
+  p.floors.push({
+    name: c.name, w: c.w, h: c.h, wt: c.wt, col: c.col, t: c.t,
+    y: topH(p), ox: perf ? 0 : dx / Math.cos(p.ta),
+  });
   p.v += dx * 0.8;
   p.combo = perf ? p.combo + 1 : 0;
-  const pts = 100 * (1 + Math.min(p.combo, 4)) + (perf ? 50 : 0);
+  const mult = 1 + Math.min(p.combo, 4);
+  const pts = 100 * mult + (perf ? 50 : 0);
   p.score += pts;
   p.shake = Math.max(p.shake, 3);
   if (perf) {
     p.perf++;
-    msg(p, `¡PERFECTO! x${1 + Math.min(p.combo, 4)}\n+${pts}`);
+    msg(p, `${say(TXT.perf[mult - 1], 'perf')}\nx${mult}  +${pts}`);
     tone(660 + p.combo * 110, 0.15, 'square', 0.08, 1320 + p.combo * 220);
-    if (S.n > 1) quake(S.P[1 - p.i], 70, 1800, 'TU RIVAL SHIPPEÓ');
+    if (S.n > 1) quake(S.P[1 - p.i], 70, 1800, say(TXT.rival, 'rival'));
   } else {
-    msg(p, '+' + pts, '#f7ffd8');
+    const k = Math.abs(dx) <= 12 * p.k ? 'casi' : ov < 0.6 * c.w ? 'pelo' : 'normal';
+    msg(p, `${say(TXT[k], k)}\n+${pts}`, '#f7ffd8');
     tone(180, 0.1, 'triangle', 0.15, 90);
   }
-  p.cur = null;
   p.next = S.el + 250;
+  chain(p);
 }
 
 function die(p, reason) {
@@ -374,17 +533,10 @@ function die(p, reason) {
   p.shake = 22;
   msg(p, reason, '#f7ffd8');
   tone(150, 0.8, 'sawtooth', 0.15, 40);
-  if (p.cur) p.floors.push({ ...p.cur, ox: p.cur.x, y: topH(p) });
+  if (p.cur) p.fall.push({ ...p.cur, a: 0, va: 2, vx: 0, vy: 0 });
   p.cur = null;
   const dir = Math.sign(p.s) || 1;
-  for (let i = p.floors.length - 1; i > 0; i--) {
-    const f = p.floors[i];
-    p.fall.push({
-      ...f, x: f.ox + bend(p, f.y), a: 0,
-      va: dir * rnd(1, 4), vx: dir * rnd(40, 200) * (f.y / 200), vy: rnd(0, 200),
-    });
-  }
-  p.floors.length = 1;
+  for (const f of p.floors.splice(1)) toFall(p, f, dir);
 }
 
 // ---------- loop ----------
@@ -399,9 +551,16 @@ function update(time, delta) {
       S.el += dt * 1000;
       const h = hour();
       if (h >= 3 && S.el >= S.ne) {
-        const ev = pick(EVENTS);
+        const ev = say(TXT.ev, 'ev');
         for (const p of S.P) quake(p, 45 + h * 4, 2600, ev);
         S.ne = S.el + rnd(7000, 12000) - h * 80;
+      }
+      const am = TXT.amb[S.ai];
+      if (am && h >= am[0]) {
+        S.ai++;
+        sc.tweens.killTweensOf(sc.tick);
+        sc.tick.setText(am[1]).setAlpha(1);
+        sc.tweens.add({ targets: sc.tick, alpha: 0, delay: 4000, duration: 600 });
       }
     }
     for (const p of S.P) upd(p, dt);
@@ -421,9 +580,10 @@ function hud() {
   const mm = String(Math.floor((h % 1) * 60)).padStart(2, '0');
   sc.clock.setText(`HORA ${hh}:${mm} / 36:00`);
   for (const p of S.P) {
+    const l = Math.max(0, p.lives);
     p.hud.setText(
       `${p.id} ${String(p.score).padStart(6, '0')}\n` +
-        `CAFÉ ${'■'.repeat(Math.max(0, p.lives))}${'□'.repeat(3 - Math.max(0, p.lives))}\n` +
+        `CAFÉ ${'■'.repeat(l)}${'□'.repeat(3 - l)}\n` +
         `PISOS ${p.floors.length - 1}` + (p.combo > 1 ? `  COMBO x${1 + Math.min(p.combo, 4)}` : ''),
     );
   }
@@ -459,7 +619,6 @@ function drawP(p, g) {
   const oy = (Math.random() - 0.5) * sh;
   const x0 = p.cx - p.vw / 2;
   const SY = (y) => GY - (y - p.cam) + oy;
-  const top = topH(p);
 
   // rejilla de fondo (sube con la cámara)
   g.lineStyle(1, C.lime, 0.07);
@@ -470,13 +629,12 @@ function drawP(p, g) {
   g.fillStyle(C.lime, 0.5);
   g.fillRect(x0, SY(0), p.vw, 2);
 
+  // torre (posiciones calculadas en chain)
   for (const f of p.floors) {
-    const ym = f.y + f.h / 2;
-    const x = ox + f.ox + bend(p, ym);
-    const y = SY(ym);
-    const a = Math.atan((2 * p.s * ym) / (top * top));
-    slab(g, x, y, f.w, f.h, a, f.col);
-    f.t.setPosition(x, y).setRotation(a);
+    const x = ox + f.cx;
+    const y = SY(f.cy);
+    slab(g, x, y, f.w, f.h, f.a, f.col);
+    f.t.setPosition(x, y).setRotation(f.a);
   }
 
   const c = p.cur;
