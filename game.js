@@ -9,6 +9,10 @@ const HOUR_MS = 4200; // 1 hora de hackathon = 4.2 s
 const END_H = 36;
 const LIM = 110; // desplazamiento máximo de la punta antes de colapsar
 const SUPPORT = 0.35; // fracción mínima del ancho que debe apoyarse al aterrizar
+const BEND_R = 300; // radio de curvatura: ángulo a altura y = s·y/R² (torres bajas casi no se curvan)
+const EASY_H = 4; // primeras horas: sin temblores y grúa lenta
+const ROPE_Y = 196; // riel de la grúa (bajo el HUD y los mensajes)
+const HANG = 150; // altura del piso colgando sobre el tope
 
 // DO NOT replace existing keys — they match the physical arcade cabinet wiring.
 // To add local testing shortcuts, append extra keys to any array.
@@ -106,7 +110,8 @@ const TXT = {
   ],
   // Fin de partida
   over: ['¡COLAPSÓ EL MVP!', 'EL MVP SE FUE A NEGRO', 'PIVOTEANDO A CONSULTORA...'],
-  nocafe: ['¡SIN CAFÉ!', 'SE ACABÓ EL CAFÉ... Y LAS GANAS', 'MODO ZOMBI: OFF'],
+  nocafe: ['¡SIN CAFÉ!', 'SE ACABÓ EL CAFÉ... Y LAS GANAS'],
+  demo: '¡LLEGÓ AL DEMO DAY!',
   // Eventos (temblores): [titular, subtítulo estilo Slack]
   ev: [
     ['MERGE CONFLICT', '#dev — "¿quién pusheó directo a main?"'],
@@ -201,35 +206,52 @@ function create() {
     if (c) CTL.held[c] = false;
   });
 
+  // capas: escombros (atrás) < torre < textos de pisos < HUD < game over
+  sc.bgfx = sc.add.graphics();
+  sc.bgrp = sc.add.container(0, 0);
   sc.gfx = sc.add.graphics();
   sc.grp = sc.add.container(0, 0);
   sc.hg = sc.add.graphics();
-  sc.clock = txt(W / 2, 10, '', 18).setOrigin(0.5, 0);
-  sc.tick = txt(W / 2, H - 22, '', 13, '#a8c700').setOrigin(0.5);
+  sc.clock = txt(W / 2, 8, '', 18).setOrigin(0.5, 0);
+  sc.tick = txt(W / 2, H - 22, '', 14, '#a8c700').setOrigin(0.5);
   sc.big = txt(W / 2, H / 2, '', 22).setOrigin(0.5).setLineSpacing(8);
+  // pantalla de fin: filas fijas
+  sc.go = sc.add.container(0, 0).setVisible(false);
+  sc.goTitle = txt(W / 2, 130, '', 40).setOrigin(0.5);
+  sc.goWhy = txt(W / 2, 190, '', 18, '#f7ffd8').setOrigin(0.5).setWordWrapWidth(720);
+  sc.goTab = txt(W / 2, 250, '', 18, '#f7ffd8').setOrigin(0.5, 0).setAlign('left').setLineSpacing(10);
+  sc.goStart = txt(W / 2, 480, 'START PARA VOLVER', 18).setOrigin(0.5);
+  sc.go.add([sc.add.rectangle(W / 2, H / 2, W, H, C.bg, 0.88), sc.goTitle, sc.goWhy, sc.goTab, sc.goStart]);
   toMenu();
 }
 
 // ---------- flujo ----------
 
 function toMenu() {
-  sc.grp.removeAll(true);
-  sc.gfx.clear();
-  sc.hg.clear();
+  clearAll();
   S = { ph: 'menu', P: [], el: 0, lock: 0 };
-  sc.clock.setText('');
-  sc.tick.setText('');
   sc.big.setText(
     'MVP EN 36 HORAS\n\n' +
       'ENTER / START1 : 1 JUGADOR\n2 / START2 : 2 JUGADORES\n\n' +
-      'BOTÓN 1 : SOLTAR FEATURE\nBOTÓN 2 : REFACTOR (estabiliza)\nJOYSTICK ←→ : AJUSTAR GRÚA',
+      'BOTÓN 1 o ↓ : SOLTAR\nBOTÓN 2 : REFACTOR (estabiliza)\nJOYSTICK ←→ : AJUSTAR GRÚA',
   );
 }
 
-function start(n) {
+function clearAll() {
   sc.grp.removeAll(true);
+  sc.bgrp.removeAll(true);
+  sc.gfx.clear();
+  sc.bgfx.clear();
+  sc.hg.clear();
+  sc.go.setVisible(false);
+  sc.clock.setText('');
+  sc.tick.setText('');
   sc.big.setText('');
-  S = { ph: 'play', P: [], n, el: 0, ne: 3 * HOUR_MS + 2000, lock: 0, ai: 0 };
+}
+
+function start(n) {
+  clearAll();
+  S = { ph: 'play', P: [], n, el: 0, ne: EASY_H * HOUR_MS + 1500, lock: 0, ai: 0 };
   for (let i = 0; i < n; i++) S.P.push(mkPlayer(i, n));
   tone(440, 0.1, 'square', 0.08, 880);
 }
@@ -240,18 +262,30 @@ function endGame(survived) {
   for (const p of S.P) {
     if (survived && !p.dead) {
       p.score += 1000;
-      msg(p, '¡LLEGASTE AL DEMO DAY!\n+1000');
+      p.why = TXT.demo + ' +1000';
+    }
+    // ocultar mensajes en juego para que no se superpongan
+    for (const t of [p.msgT, p.evT, p.subT]) {
+      sc.tweens.killTweensOf(t);
+      t.setAlpha(0);
     }
   }
-  const lines = S.P.map(
-    (p) => `${p.id}  ${String(p.score).padStart(6, '0')}  PISOS ${p.floors.length - 1}  PERFECTOS ${p.perf}`,
-  );
-  let head = 'FIN DE LA HACKATHON';
+  let head = survived ? 'DEMO DAY' : 'FIN DE LA HACKATHON';
   if (S.n > 1) {
     const [a, b] = S.P;
-    head = a.score === b.score ? 'EMPATE' : (a.score > b.score ? 'GANA P1' : 'GANA P2');
+    head = a.score === b.score ? 'EMPATE' : a.score > b.score ? 'GANA P1' : 'GANA P2';
   }
-  sc.big.setText(head + '\n\n' + lines.join('\n') + '\n\nSTART PARA VOLVER');
+  sc.goTitle.setText(head);
+  sc.goWhy.setText(S.P.map((p) => (S.n > 1 ? p.id + ': ' : '') + (p.why || '')).join('   ·   '));
+  sc.goTab.setText(
+    // tabla de columnas fijas (alineada a la izquierda)
+    ['JUG.', 'PUNTAJE', 'ALTURA MÁX', 'PERFECTOS']
+      .concat(...S.P.map((p) => [p.id, String(p.score).padStart(6, '0'), p.maxH + ' pisos', String(p.perf)]))
+      .map((v, i) => (i % 4 < 3 ? v.padEnd([6, 10, 13][i % 4]) : v + '\n'))
+      .join('')
+      .trim(),
+  );
+  sc.go.setVisible(true);
   tone(330, 0.5, 'triangle', 0.12, 660);
 }
 
@@ -265,14 +299,15 @@ function mkPlayer(i, n) {
     vw: n > 1 ? 400 : 800,
     floors: [], fall: [], cur: null, next: 0,
     s: 0, v: 0, com: 0, cam: 0, ph: Math.random() * 6, nudge: 0,
-    lives: 3, score: 0, combo: 0, perf: 0, dead: false, rf: 0,
+    lives: 3, score: 0, combo: 0, perf: 0, maxH: 0, why: '', dead: false, rf: 0,
     qm: 0, qu: 0, qp: 0, shake: 0,
   };
   const x0 = p.cx - p.vw / 2;
-  p.hud = txt(x0 + 12, 36, '', 15).setOrigin(0, 0).setAlign('left');
-  p.msgT = txt(p.cx, 290, '', 20).setOrigin(0.5).setAlpha(0).setWordWrapWidth(p.vw - 30);
-  p.evT = txt(p.cx, 215, '', 20, '#f7ffd8').setOrigin(0.5).setAlpha(0).setWordWrapWidth(p.vw - 30);
-  p.subT = txt(p.cx, 245, '', 12, '#a8c700').setOrigin(0.5).setAlpha(0).setWordWrapWidth(p.vw - 30);
+  // zonas fijas por viewport: HUD (y 34-56) · eventos (66-130) · mensajes (140-190) · riel grúa (196)
+  p.hud = txt(x0 + 12, 34, '', n > 1 ? 13 : 15).setOrigin(0, 0).setAlign('left');
+  p.evT = txt(p.cx, 66, '', 20, '#f7ffd8').setOrigin(0.5, 0).setAlpha(0).setWordWrapWidth(p.vw - 30);
+  p.subT = txt(p.cx, 92, '', 16, '#a8c700').setOrigin(0.5, 0).setAlpha(0).setWordWrapWidth(p.vw - 30);
+  p.msgT = txt(p.cx, 166, '', 18).setOrigin(0.5).setAlpha(0).setWordWrapWidth(p.vw - 30).setLineSpacing(2);
   sc.grp.add([p.hud, p.msgT, p.evT, p.subT]);
   const base = { name: 'IDEA', w: 170 * k, h: FH * k, wt: 3, col: C.lime3, ox: 0, y: 0 };
   base.t = floorText(base, '#e1ff00');
@@ -297,9 +332,10 @@ const topH = (p) => {
 // Calcula la torre como cadena: cada piso se apoya en el borde superior del
 // anterior, desplazado por su offset (f.ox) y rotado por el ángulo acumulado.
 // Coordenadas de mundo: x relativo al centro, y hacia arriba.
+// La única rotación es la curvatura global: ángulo(y) = s·y/R². Entre pisos
+// consecutivos la diferencia es ~1°, así cada piso queda plano sobre el de abajo.
 function chain(p) {
-  const Ht = Math.max(topH(p), 60);
-  const th = (2 * p.s) / Ht; // ángulo en la punta (curva cuadrática)
+  const th = p.s / (BEND_R * BEND_R);
   let X = 0;
   let px = 0;
   let py = 0;
@@ -307,7 +343,7 @@ function chain(p) {
   p.floors.forEach((f, i) => {
     X += f.ox;
     f.X = X; // centro sin balanceo
-    const a = i ? (th * (f.y + f.h / 2)) / Ht : 0;
+    const a = i ? th * (f.y + f.h / 2) : 0;
     const bx = px + f.ox * Math.cos(pa);
     const by = py - f.ox * Math.sin(pa);
     f.a = a;
@@ -346,7 +382,7 @@ function jenga(p) {
 // Todo lo que está sobre el piso i-1 se vuelca y cae.
 function topple(p, i, dir) {
   const n = p.floors.length - i;
-  for (const f of p.floors.splice(i)) toFall(p, f, dir);
+  for (const f of p.floors.splice(i)) floorFall(p, f, dir);
   p.s *= 0.3;
   p.v *= 0.3;
   p.combo = 0;
@@ -358,12 +394,17 @@ function topple(p, i, dir) {
   if (p.lives <= 0) die(p, say(TXT.nocafe, 'nocafe'));
 }
 
-function toFall(p, f, dir) {
+// Convierte un piso en escombro: sale disparado hacia el lado de la caída,
+// se dibuja detrás de la torre y se desvanece.
+function toFall(p, f, dir, x, y, a) {
+  sc.grp.remove(f.t);
+  sc.bgrp.add(f.t);
   p.fall.push({
-    ...f, x: f.cx, y: f.cy - f.h / 2, a: f.a,
-    va: dir * rnd(1.5, 4), vx: dir * rnd(60, 180), vy: rnd(0, 150),
+    ...f, x, y, a, al: 1,
+    va: dir * rnd(1.5, 4), vx: dir * rnd(180, 340), vy: rnd(120, 320),
   });
 }
+const floorFall = (p, f, dir) => toFall(p, f, dir, f.cx, f.cy - f.h / 2, f.a);
 
 function spawnCur(p) {
   const h = hour();
@@ -373,7 +414,7 @@ function spawnCur(p) {
   const c = {
     name: d[0], w: d[1] * p.k, h: FH * p.k, wt: d[2],
     col: isCreep ? C.white : pick(FLOOR_COLS),
-    x: 0, y: topH(p) + 170, vy: 0, st: 'hang',
+    x: 0, y: topH(p) + HANG, vy: 0, st: 'hang',
   };
   c.t = floorText(c);
   p.cur = c;
@@ -409,7 +450,8 @@ function upd(p, dt) {
     f.x += f.vx * dt;
     f.y += f.vy * dt;
     f.a += f.va * dt;
-    if (f.y < p.cam - 250) {
+    f.al -= dt * 0.9;
+    if (f.al <= 0 || f.y < p.cam - 250) {
       f.t.destroy();
       p.fall.splice(i, 1);
     }
@@ -454,9 +496,10 @@ function upd(p, dt) {
   const a = -ks * (p.s - 2.4 * p.com) - 1.1 * p.v + F;
   p.v += a * dt;
   p.s += p.v * dt;
-  if (Math.abs(p.s) > LIM * p.k) return die(p, say(TXT.over, 'over'));
 
   chain(p);
+  // inclinación global: desplazamiento real de la punta vs. su posición sin balanceo
+  if (Math.abs(p.tx - p.floors[p.floors.length - 1].X) > LIM * p.k) return die(p, say(TXT.over, 'over'));
   jenga(p);
   if (p.dead) return;
 
@@ -464,17 +507,22 @@ function upd(p, dt) {
   const tf = p.floors[p.floors.length - 1];
 
   // cámara
-  p.cam += (Math.max(0, top - 230) - p.cam) * Math.min(1, dt * 4);
+  p.cam += (Math.max(0, top - 170) - p.cam) * Math.min(1, dt * 4);
 
   // grúa y caída
   if (!p.cur && S.el >= p.next) spawnCur(p);
   const c = p.cur;
   if (!c) return;
   if (c.st === 'hang') {
-    p.ph += dt * (1.4 + h * 0.05);
-    c.x = tf.X + p.nudge + Math.sin(p.ph) * (60 + h * 2.2) * p.k;
-    c.y = top + 170;
-    if (prs(p.id + '_1')) {
+    // inicio amable: grúa lenta las primeras EASY_H horas, luego acelera
+    const ez = Math.min(h / EASY_H, 1);
+    const he = Math.max(0, h - EASY_H);
+    p.ph += dt * (0.9 + ez * 0.4 + he * 0.05);
+    c.x = tf.X + p.nudge + Math.sin(p.ph) * (45 + ez * 15 + he * 2.2) * p.k;
+    c.y = top + HANG;
+    // soltar: botón 1, o palanca ABAJO (solo flanco y sin izquierda/derecha)
+    const down = prs(p.id + '_D') && !CTL.held[p.id + '_L'] && !CTL.held[p.id + '_R'];
+    if (prs(p.id + '_1') || down) {
       c.st = 'drop';
       tone(520, 0.08, 'square', 0.06, 300);
     }
@@ -492,8 +540,7 @@ function land(p, c, tf) {
   p.cur = null;
   if (ov < SUPPORT * c.w) {
     // no se apoya lo suficiente: resbala y cae
-    const d = Math.sign(dx) || 1;
-    p.fall.push({ ...c, a: 0, va: d * 3, vx: d * 90, vy: -c.vy * 0.3 });
+    toFall(p, c, Math.sign(dx) || 1, c.x, c.y, 0);
     p.combo = 0;
     p.lives--;
     p.shake = 8;
@@ -524,19 +571,21 @@ function land(p, c, tf) {
     msg(p, `${say(TXT[k], k)}\n+${pts}`, '#f7ffd8');
     tone(180, 0.1, 'triangle', 0.15, 90);
   }
+  p.maxH = Math.max(p.maxH, p.floors.length - 1);
   p.next = S.el + 250;
   chain(p);
 }
 
 function die(p, reason) {
   p.dead = true;
+  p.why = reason;
   p.shake = 22;
   msg(p, reason, '#f7ffd8');
   tone(150, 0.8, 'sawtooth', 0.15, 40);
-  if (p.cur) p.fall.push({ ...p.cur, a: 0, va: 2, vx: 0, vy: 0 });
-  p.cur = null;
   const dir = Math.sign(p.s) || 1;
-  for (const f of p.floors.splice(1)) toFall(p, f, dir);
+  if (p.cur) toFall(p, p.cur, dir, p.cur.x, p.cur.y, 0);
+  p.cur = null;
+  for (const f of p.floors.splice(1)) floorFall(p, f, dir);
 }
 
 // ---------- loop ----------
@@ -550,7 +599,7 @@ function update(time, delta) {
     if (S.ph === 'play') {
       S.el += dt * 1000;
       const h = hour();
-      if (h >= 3 && S.el >= S.ne) {
+      if (h >= EASY_H && S.el >= S.ne) {
         const ev = say(TXT.ev, 'ev');
         for (const p of S.P) quake(p, 45 + h * 4, 2600, ev);
         S.ne = S.el + rnd(7000, 12000) - h * 80;
@@ -581,39 +630,40 @@ function hud() {
   sc.clock.setText(`HORA ${hh}:${mm} / 36:00`);
   for (const p of S.P) {
     const l = Math.max(0, p.lives);
+    const sp = S.n > 1 ? ' ' : '   ';
     p.hud.setText(
-      `${p.id} ${String(p.score).padStart(6, '0')}\n` +
-        `CAFÉ ${'■'.repeat(l)}${'□'.repeat(3 - l)}\n` +
-        `PISOS ${p.floors.length - 1}` + (p.combo > 1 ? `  COMBO x${1 + Math.min(p.combo, 4)}` : ''),
+      `${p.id} ${String(p.score).padStart(6, '0')}${sp}CAFÉ ${'■'.repeat(l)}${'□'.repeat(3 - l)}` +
+        `${sp}PISOS ${p.floors.length - 1}` + (p.combo > 1 ? `${sp}x${1 + Math.min(p.combo, 4)}` : ''),
     );
   }
 }
 
-function slab(g, x, y, w, h, a, col) {
+function slab(g, x, y, w, h, a, col, al = 1) {
   const c = Math.cos(a);
   const s = Math.sin(a);
   const pts = [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]].map(([u, v]) => ({
     x: x + u * c - v * s,
     y: y + u * s + v * c,
   }));
-  g.fillStyle(col, 1);
+  g.fillStyle(col, al);
   g.fillPoints(pts, true);
-  g.lineStyle(2, C.ink, 1);
+  g.lineStyle(2, C.ink, al);
   g.strokePoints(pts, true);
 }
 
 function draw() {
   const g = sc.gfx;
   g.clear();
+  sc.bgfx.clear();
   sc.hg.clear();
-  for (const p of S.P) drawP(p, g);
+  for (const p of S.P) drawP(p, g, sc.bgfx);
   if (S.n > 1) {
     g.fillStyle(C.lime, 0.7);
     g.fillRect(W / 2 - 2, 0, 4, H);
   }
 }
 
-function drawP(p, g) {
+function drawP(p, g, bg) {
   const sh = p.shake;
   const ox = p.cx + (Math.random() - 0.5) * sh;
   const oy = (Math.random() - 0.5) * sh;
@@ -621,13 +671,21 @@ function drawP(p, g) {
   const SY = (y) => GY - (y - p.cam) + oy;
 
   // rejilla de fondo (sube con la cámara)
-  g.lineStyle(1, C.lime, 0.07);
-  for (let y = Math.floor(p.cam / 40) * 40; SY(y) > -40; y += 40) g.lineBetween(x0, SY(y), x0 + p.vw, SY(y));
+  bg.lineStyle(1, C.lime, 0.07);
+  for (let y = Math.floor(p.cam / 40) * 40; SY(y) > -40; y += 40) bg.lineBetween(x0, SY(y), x0 + p.vw, SY(y));
   // suelo
-  g.fillStyle(C.dark, 1);
-  g.fillRect(x0, SY(0), p.vw, H);
-  g.fillStyle(C.lime, 0.5);
-  g.fillRect(x0, SY(0), p.vw, 2);
+  bg.fillStyle(C.dark, 1);
+  bg.fillRect(x0, SY(0), p.vw, H);
+  bg.fillStyle(C.lime, 0.5);
+  bg.fillRect(x0, SY(0), p.vw, 2);
+
+  // escombros: detrás de la torre (capa trasera), desvaneciéndose
+  for (const f of p.fall) {
+    const x = ox + f.x;
+    const y = SY(f.y + f.h / 2);
+    slab(bg, x, y, f.w, f.h, f.a, f.col, f.al);
+    f.t.setPosition(x, y).setRotation(f.a).setAlpha(f.al);
+  }
 
   // torre (posiciones calculadas en chain)
   for (const f of p.floors) {
@@ -642,26 +700,26 @@ function drawP(p, g) {
     const x = ox + c.x;
     const y = SY(c.y + c.h / 2);
     if (c.st === 'hang') {
+      // cable desde el riel (bajo el HUD) hasta el piso colgando
       g.lineStyle(2, C.lime2, 0.8);
-      g.lineBetween(x, 0, x, y - c.h / 2);
+      g.lineBetween(x, ROPE_Y, x, y - c.h / 2);
+      g.fillStyle(C.lime2, 1);
+      g.fillRect(x - 8, ROPE_Y - 4, 16, 6);
     }
     slab(g, x, y, c.w, c.h, 0, c.col);
     c.t.setPosition(x, y).setRotation(0);
   }
 
-  for (const f of p.fall) {
-    const x = ox + f.x;
-    const y = SY(f.y + f.h / 2);
-    slab(g, x, y, f.w, f.h, f.a, f.col);
-    f.t.setPosition(x, y).setRotation(f.a);
-  }
+  // riel de la grúa
+  sc.hg.fillStyle(C.lime3, 0.6);
+  sc.hg.fillRect(x0 + 8, ROPE_Y - 2, p.vw - 16, 2);
 
   // barra de REFACTOR
   const r = clamp(1 - (p.rf - S.el) / 7000, 0, 1);
   sc.hg.fillStyle(C.lime3, 1);
-  sc.hg.fillRect(x0 + 12, 100, 90, 6);
+  sc.hg.fillRect(x0 + 12, 55, 90, 5);
   sc.hg.fillStyle(r >= 1 ? C.lime : C.lime2, 1);
-  sc.hg.fillRect(x0 + 12, 100, 90 * r, 6);
+  sc.hg.fillRect(x0 + 12, 55, 90 * r, 5);
 }
 
 // ---------- sonido ----------
