@@ -113,8 +113,11 @@ const TXT = {
     '¡QUEDÓ LA ESCOBA!', 'ESTO NO ESCALA', 'REFACTORIZAR ERA OPCIONAL, DIJERON',
   ],
   // Fin de partida
-  over: ['¡COLAPSÓ EL MVP!', 'EL MVP SE FUE A NEGRO', 'PIVOTEANDO A CONSULTORA...'],
-  nocafe: ['¡SIN CAFÉ!', 'SE ACABÓ EL CAFÉ... Y LAS GANAS'],
+  // Motivos de eliminación (un texto fijo por causa)
+  over: '¡COLAPSÓ EL MVP!',
+  nocafe: '¡SIN CAFÉ!',
+  elim: 'ELIMINADO',
+  wait: 'esperando al rival...',
   demo: '¡LLEGÓ AL DEMO DAY!',
   warn: '¡CRUJE LA TORRE!\nUSA REFACTOR',
   // Pantalla de título
@@ -192,6 +195,9 @@ let sc; // escena
 let S; // estado de partida
 const CTL = { held: Object.create(null), pressed: Object.create(null) };
 const LAST = {}; // último texto mostrado por categoría (para no repetir)
+const LI = { any: 0 }; // último input (Date.now) por jugador ('P1', 'P2') y global
+const AUTO_DROP_MS = 8000; // sin input del jugador: el piso se suelta solo
+const ABANDON_MS = 20000; // sin ningún input: la partida termina y vuelve al título
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 // mezcla lineal de dos colores 0xRRGGBB
@@ -234,6 +240,7 @@ function create() {
     if (!c) return;
     if (!CTL.held[c]) CTL.pressed[c] = true;
     CTL.held[c] = true;
+    LI[c.slice(0, 2)] = LI.any = Date.now();
   });
   window.addEventListener('keyup', (e) => {
     const c = KEYBOARD_TO_ARCADE[normalizeIncomingKey(e.key)];
@@ -347,6 +354,7 @@ function titleFrame(time, dt) {
 function begin(n) {
   sc.ti.setVisible(false);
   start(n);
+  S.t0 = Date.now();
   S.ph = 'count';
   S.cdT = sc.time.now;
   S.cdi = -1;
@@ -429,6 +437,13 @@ function endGame(survived) {
       .trim(),
   );
   sc.go.setVisible(true);
+  sc.clock.setText('');
+  sc.tick.setAlpha(0);
+  sc.tickBg.setAlpha(0);
+  for (const p of S.P) {
+    p.hud.setVisible(false);
+    for (const o of p.elim || []) o.setVisible(false);
+  }
   tone(330, 0.5, 'triangle', 0.12, 660);
   S.mark = [];
   const qs = S.P.filter((p) => qualifies(p.score));
@@ -552,7 +567,7 @@ function topple(p, i, dir) {
   msg(p, say(n > 1 ? TXT.derr : TXT.cae, n > 1 ? 'derr' : 'cae') + '\n-1 CAFÉ', '#f7ffd8');
   tone(160, 0.5, 'sawtooth', 0.12, 50);
   chain(p);
-  if (p.lives <= 0) die(p, say(TXT.nocafe, 'nocafe'));
+  if (p.lives <= 0) die(p, TXT.nocafe);
 }
 
 // Convierte un piso en escombro: sale disparado hacia el lado de la caída,
@@ -594,7 +609,7 @@ function spawnCur(p) {
   const c = {
     name: d[0], w: d[1] * p.k, h: FH * p.k, wt: d[2],
     col: isCreep ? C.white : pick(FLOOR_COLS),
-    x: 0, y: topH(p) + HANG, vy: 0, st: 'hang',
+    x: 0, y: topH(p) + HANG, vy: 0, st: 'hang', t0: Date.now(),
   };
   c.t = floorText(c);
   p.cur = c;
@@ -679,7 +694,7 @@ function upd(p, dt) {
 
   chain(p);
   // inclinación global: desplazamiento real de la punta vs. su posición sin balanceo
-  if (Math.abs(p.tx - p.floors[p.floors.length - 1].X) > LIM * p.k) return die(p, say(TXT.over, 'over'));
+  if (Math.abs(p.tx - p.floors[p.floors.length - 1].X) > LIM * p.k) return die(p, TXT.over);
   jenga(p);
   if (p.dead) return;
 
@@ -712,7 +727,9 @@ function upd(p, dt) {
     c.y = top + HANG;
     // soltar: botón 1, o palanca ABAJO (solo flanco y sin izquierda/derecha)
     const down = prs(p.id + '_D') && !CTL.held[p.id + '_L'] && !CTL.held[p.id + '_R'];
-    if (prs(p.id + '_1') || down || (p.ai && aiDrop(p, c))) {
+    // jugador ausente: suelta solo tras AUTO_DROP_MS sin input
+    const away = !p.ai && Date.now() - Math.max(LI[p.id] || 0, c.t0) > AUTO_DROP_MS;
+    if (prs(p.id + '_1') || down || away || (p.ai && aiDrop(p, c))) {
       c.st = 'drop';
       tone(520, 0.08, 'square', 0.06, 300);
     }
@@ -736,7 +753,7 @@ function land(p, c, tf) {
     p.shake = 8;
     msg(p, say(TXT.cae, 'cae') + '\n-1 CAFÉ', '#f7ffd8');
     tone(200, 0.3, 'sawtooth', 0.1, 60);
-    if (p.lives <= 0) return die(p, say(TXT.nocafe, 'nocafe'));
+    if (p.lives <= 0) return die(p, TXT.nocafe);
     p.next = S.el + 450;
     return;
   }
@@ -775,7 +792,19 @@ function die(p, reason) {
   const dir = Math.sign(p.s) || 1;
   if (p.cur) toFall(p, p.cur, dir, p.cur.x, p.cur.y, 0);
   p.cur = null;
-  for (const f of p.floors.splice(1)) floorFall(p, f, dir);
+  // colapso total: cae todo; sin café: los restos quedan en pie (apagados)
+  if (reason === TXT.over) for (const f of p.floors.splice(1)) floorFall(p, f, dir);
+  if (S.n > 1) {
+    const y = 330;
+    p.elim = [
+      sc.add.rectangle(p.cx, y, p.vw - 60, 130, C.bg, 0.88).setStrokeStyle(2, C.lime3),
+      txt(p.cx, y - 36, TXT.elim, 30, '#f7ffd8').setOrigin(0.5),
+      txt(p.cx, y + 6, '', 16).setOrigin(0.5),
+      txt(p.cx, y + 38, TXT.wait, 14, '#a8c700').setOrigin(0.5),
+    ];
+    sc.grp.add(p.elim);
+    sc.tweens.add({ targets: p.elim[3], alpha: 0.3, duration: 600, yoyo: true, repeat: -1 });
+  }
 }
 
 // ---------- loop ----------
@@ -804,6 +833,8 @@ function update(time, delta) {
     }
     for (const p of S.P) upd(p, dt);
     if (S.ph === 'play') {
+      // partida abandonada: vuelve al título sin pedir iniciales
+      if (Date.now() - Math.max(LI.any, S.t0) > ABANDON_MS) return toTitle();
       if (S.P.every((p) => p.dead)) endGame(false);
       else if (hour() >= END_H) endGame(true);
     } else if (S.ph === 'name') {
@@ -816,7 +847,7 @@ function update(time, delta) {
       else if (time > S.idle) toTitle();
     }
   }
-  if (S.ph !== 'title') hud();
+  if (S.ph === 'play' || S.ph === 'count') hud();
   draw();
   for (const k in CTL.pressed) CTL.pressed[k] = false;
 }
@@ -833,6 +864,7 @@ function hud() {
       `${p.id} ${String(p.score).padStart(6, '0')}${sp}CAFÉ ${'■'.repeat(l)}${'□'.repeat(3 - l)}` +
         `${sp}PISOS ${p.floors.length - 1}` + (p.combo > 1 ? `${sp}x${1 + Math.min(p.combo, 4)}` : ''),
     );
+    if (p.elim) p.elim[2].setText(`${String(p.score).padStart(6, '0')} PTS · ALTURA MÁX ${p.maxH}`);
   }
 }
 
@@ -891,8 +923,8 @@ function drawP(p, g, bg) {
     const rk = f.rk || 0;
     const x = ox + f.cx + (Math.random() - 0.5) * rk * 6;
     const y = SY(f.cy);
-    slab(g, x, y, f.w, f.h, f.a, rk > 0.02 ? mix(f.col, RISK_COL, 0.2 + rk * 0.8) : f.col);
-    f.t.setPosition(x, y).setRotation(f.a);
+    slab(g, x, y, f.w, f.h, f.a, rk > 0.02 ? mix(f.col, RISK_COL, 0.2 + rk * 0.8) : f.col, p.dead ? 0.35 : 1);
+    f.t.setPosition(x, y).setRotation(f.a).setAlpha(p.dead ? 0.35 : 1);
   }
 
   const c = p.cur;
@@ -914,6 +946,7 @@ function drawP(p, g, bg) {
   sc.hg.fillStyle(C.lime3, 0.6);
   sc.hg.fillRect(x0 + 8, ROPE_Y - 2, p.vw - 16, 2);
 
+  if (S.ph !== 'play' && S.ph !== 'count') return; // sin HUD fuera de la partida
   // barra de REFACTOR
   const r = clamp(1 - (p.rf - S.el) / 7000, 0, 1);
   sc.hg.fillStyle(C.lime3, 1);
