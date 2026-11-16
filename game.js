@@ -121,11 +121,23 @@ const TXT = {
   sub: 'PLATANUS HACK 26 · SANTIAGO',
   tag: 'apila features · sobrevive a la hackathon · llega al demo day',
   go: '¡A HACKEAR!',
+  // Leaderboard
+  rec: '¡NUEVO RÉCORD!',
+  hint: '↑↓ LETRA   ←→ MOVER\nBOTÓN 1: OK   BOTÓN 2: ATRÁS',
+  ready: 'LISTO',
+  topEmpty: 'NADIE HA LLEGADO AL DEMO DAY...\n¡SÉ EL PRIMERO!',
+  saving: '(guardando...)',
+  saved: '(guardado)',
+  local: '(sin conexión: solo local)',
+  again: 'START1: JUGAR 1P   ·   START2: JUGAR 2P',
   // Paneles que rotan en el attract mode
+  // null = panel TOP 10 (se arma con los récords guardados)
   panels: [
     'CÓMO JUGAR\n\nBOTÓN 1 o ↓ : SOLTAR FEATURE\n← → : AJUSTAR LA GRÚA\nBOTÓN 2 : REFACTOR (estabiliza)\n\nPISO PERFECTO = COMBO\nNO TE QUEDES SIN CAFÉ',
+    null,
     'LA HACKATHON\n\n36 HORAS PARA APILAR TU MVP\nMERGE CONFLICTS, MENTORES Y WIFI CAÍDA\nLO SACUDEN TODO\nSI LA TORRE SE PONE ROJA... ¡REFACTOR!',
     'SCOPE CREEP\n\nBLOCKCHAIN · IA QUE HACE IA\nUBER DE EMPANADAS · METAVERSO B2B\nTINDER DE COFOUNDERS\n\nNADIE PIDIÓ ESTO. APÍLALO IGUAL.',
+    null,
     '2 JUGADORES\n\nPANTALLA DIVIDIDA\nCADA PISO PERFECTO LE MANDA\nUN TEMBLOR A TU RIVAL\n\nPRESIONA START2',
   ],
   // Eventos (temblores): [titular, subtítulo estilo Slack]
@@ -241,12 +253,17 @@ function create() {
   sc.big = txt(W / 2, 300, '', 80).setOrigin(0.5); // cuenta regresiva
   // pantalla de fin: filas fijas
   sc.go = sc.add.container(0, 0).setVisible(false);
-  sc.goTitle = txt(W / 2, 130, '', 40).setOrigin(0.5);
-  sc.goWhy = txt(W / 2, 190, '', 18, '#f7ffd8').setOrigin(0.5).setWordWrapWidth(720);
-  sc.goTab = txt(W / 2, 250, '', 18, '#f7ffd8').setOrigin(0.5, 0).setAlign('left').setLineSpacing(10);
-  sc.goStart = txt(W / 2, 470, 'START1: JUGAR 1P   ·   START2: JUGAR 2P', 18).setOrigin(0.5);
-  sc.goIdle = txt(W / 2, 505, '', 13, '#a8c700').setOrigin(0.5);
-  sc.go.add([sc.add.rectangle(W / 2, H / 2, W, H, C.bg, 0.88), sc.goTitle, sc.goWhy, sc.goTab, sc.goStart, sc.goIdle]);
+  // filas: título 64 · motivo 108 · resultados 136 · récord/TOP 10 250 · START 522 · idle 554
+  sc.goTitle = txt(W / 2, 64, '', 40).setOrigin(0.5);
+  sc.goWhy = txt(W / 2, 108, '', 18, '#f7ffd8').setOrigin(0.5).setWordWrapWidth(720);
+  sc.goTab = txt(W / 2, 136, '', 18, '#f7ffd8').setOrigin(0.5, 0).setAlign('left').setLineSpacing(8);
+  sc.goTop = txt(W / 2, 250, '', 15, '#e1ff00').setOrigin(0.5, 0).setAlign('left').setLineSpacing(3);
+  sc.goStart = txt(W / 2, 522, '', 18).setOrigin(0.5);
+  sc.goIdle = txt(W / 2, 554, '', 13, '#a8c700').setOrigin(0.5);
+  sc.go.add([
+    sc.add.rectangle(W / 2, H / 2, W, H, C.bg, 0.9),
+    sc.goTitle, sc.goWhy, sc.goTab, sc.goTop, sc.goStart, sc.goIdle,
+  ]);
 
   // pantalla de título (sobre la torre demo del attract mode)
   // la torre demo se arma a la izquierda; todo el texto va en una columna
@@ -270,6 +287,10 @@ function create() {
   sc.tweens.add({ targets: sc.tiPress, alpha: 0.15, duration: 500, yoyo: true, repeat: -1 });
   sc.tweens.add({ targets: sc.tiTitle, scale: 1.04, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
   toTitle();
+  loadTop().then((t) => {
+    TOP = t;
+    if (S.ph === 'title' && !TXT.panels[S.pi]) showPanel(S.pi);
+  });
 }
 
 // ---------- flujo: título (attract) → cuenta → juego → fin → ... ----------
@@ -306,7 +327,8 @@ function aiDrop(p, c) {
 function showPanel(i) {
   S.pi = i % TXT.panels.length;
   S.pt = sc.time.now + 5500;
-  sc.tiPanel.setText(TXT.panels[S.pi]).setAlpha(0);
+  const pn = TXT.panels[S.pi];
+  sc.tiPanel.setFontSize(pn ? 17 : 15).setText(pn || 'TOP 10\n\n' + topLines()).setAlpha(0);
   sc.tiPanelBg.setSize(Math.max(420, sc.tiPanel.width + 40), sc.tiPanel.height + 36).setOrigin(0.5);
   sc.tweens.add({ targets: sc.tiPanel, alpha: 1, duration: 300 });
 }
@@ -408,6 +430,13 @@ function endGame(survived) {
   );
   sc.go.setVisible(true);
   tone(330, 0.5, 'triangle', 0.12, 660);
+  S.mark = [];
+  const qs = S.P.filter((p) => qualifies(p.score));
+  if (qs.length) startNames(qs, sc.time.now);
+  else {
+    showTop();
+    sc.goStart.setText(TXT.again);
+  }
 }
 
 // ---------- jugador ----------
@@ -777,6 +806,8 @@ function update(time, delta) {
     if (S.ph === 'play') {
       if (S.P.every((p) => p.dead)) endGame(false);
       else if (hour() >= END_H) endGame(true);
+    } else if (S.ph === 'name') {
+      nameFrame(time);
     } else {
       // fin: reinicio rápido sin pasar por el título, o vuelta al attract si nadie juega
       sc.goIdle.setText(`volviendo al título en ${Math.max(0, Math.ceil((S.idle - time) / 1000))}`);
@@ -889,6 +920,173 @@ function drawP(p, g, bg) {
   sc.hg.fillRect(x0 + 12, 55, 90, 5);
   sc.hg.fillStyle(r >= 1 ? C.lime : C.lime2, 1);
   sc.hg.fillRect(x0 + 12, 55, 90 * r, 5);
+}
+
+// ---------- leaderboard (top 10) ----------
+// Usa window.platanusArcadeStorage; si no existe, localStorage; si falla, memoria.
+// Todo dato leído se valida (la forma puede haber cambiado entre versiones).
+
+const TOP_KEY = 'mvp36-top10';
+const TOP_N = 10;
+const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-';
+let TOP = [];
+const MEM = {};
+
+function store() {
+  if (window.platanusArcadeStorage) return window.platanusArcadeStorage;
+  return {
+    async get(k) {
+      try {
+        const r = window.localStorage.getItem(k);
+        return r === null ? { found: false } : { found: true, value: JSON.parse(r) };
+      } catch (e) {
+        return k in MEM ? { found: true, value: MEM[k] } : { found: false };
+      }
+    },
+    async set(k, v) {
+      try {
+        window.localStorage.setItem(k, JSON.stringify(v));
+      } catch (e) {
+        MEM[k] = v;
+      }
+    },
+  };
+}
+
+// evita quedar colgado si el puente de storage no responde
+const withTimeout = (pr, ms) => Promise.race([pr, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+
+function cleanTop(v) {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter(
+      (e) =>
+        e && typeof e === 'object' && typeof e.n === 'string' && /^[A-Z0-9.\-]{1,3}$/.test(e.n) &&
+        Number.isFinite(e.s) && e.s >= 0 && e.s < 1e9,
+    )
+    .map((e) => ({
+      n: e.n,
+      s: Math.floor(e.s),
+      h: Number.isFinite(e.h) ? clamp(Math.floor(e.h), 0, 999) : 0,
+      d: Number.isFinite(e.d) ? e.d : 0,
+    }))
+    .sort((a, b) => b.s - a.s || a.d - b.d) // empate: el más antiguo primero
+    .slice(0, TOP_N);
+}
+
+async function loadTop() {
+  try {
+    const r = await withTimeout(store().get(TOP_KEY), 2500);
+    return cleanTop(r && r.found ? r.value : MEM[TOP_KEY] || []);
+  } catch (e) {
+    return cleanTop(MEM[TOP_KEY] || TOP);
+  }
+}
+
+// relee lo último guardado, agrega las entradas nuevas y guarda
+async function saveTop(add) {
+  const merged = cleanTop((await loadTop()).concat(add));
+  MEM[TOP_KEY] = merged;
+  try {
+    await withTimeout(store().set(TOP_KEY, merged), 2500);
+    return { top: merged, ok: true };
+  } catch (e) {
+    return { top: merged, ok: false };
+  }
+}
+
+const qualifies = (s) => s > 0 && (TOP.length < TOP_N || s > TOP[TOP_N - 1].s);
+
+function topLines(mark) {
+  if (!TOP.length) return TXT.topEmpty;
+  return TOP.map(
+    (e, i) =>
+      `${String(i + 1).padStart(2, '0')}  ${e.n.padEnd(3)}  ${String(e.s).padStart(6, '0')}  ${String(e.h).padStart(3)} pisos` +
+      (mark && mark.includes(e.d) ? ' ◄' : '  '),
+  ).join('\n');
+}
+
+// ---------- ingreso de iniciales (estilo arcade) ----------
+
+function startNames(qs, time) {
+  S.ph = 'name';
+  S.nameEnd = time + 30000; // si nadie confirma, se guarda solo
+  sc.goStart.setText('');
+  sc.goIdle.setText('');
+  sc.goTop.setText('');
+  S.ent = qs.map((p) => {
+    const x = S.n > 1 ? 200 + 400 * p.i : W / 2;
+    const e = { p, l: [0, 0, 0], k: 0, done: false, rt: 0 };
+    e.lab = txt(x, 280, (S.n > 1 ? p.id + ' · ' : '') + TXT.rec, 20).setOrigin(0.5);
+    e.ch = [0, 1, 2].map((i) => txt(x + (i - 1) * 56, 350, 'A', 52, '#f7ffd8').setOrigin(0.5));
+    e.hint = txt(x, 425, TXT.hint, 13, '#a8c700').setOrigin(0.5).setLineSpacing(4);
+    sc.go.add([e.lab, ...e.ch, e.hint]);
+    return e;
+  });
+}
+
+function nameFrame(time) {
+  for (const e of S.ent) {
+    const id = e.p.id;
+    if (e.done || time < S.lock) continue;
+    // ↑↓ cambia la letra (con auto-repetición al mantener)
+    let dy = 0;
+    if (prs(id + '_U')) dy = 1;
+    else if (prs(id + '_D')) dy = -1;
+    if (dy) e.rt = time + 380;
+    else if ((CTL.held[id + '_U'] || CTL.held[id + '_D']) && time >= e.rt) {
+      dy = CTL.held[id + '_U'] ? 1 : -1;
+      e.rt = time + 90;
+    }
+    if (dy) {
+      e.l[e.k] = (e.l[e.k] + dy + CHARS.length) % CHARS.length;
+      tone(900, 0.04, 'square', 0.05);
+    }
+    // ←→ mueve el cursor; botón 2 retrocede; botón 1 confirma la letra
+    if (prs(id + '_R')) e.k = Math.min(2, e.k + 1);
+    if (prs(id + '_L') || prs(id + '_2')) e.k = Math.max(0, e.k - 1);
+    if (prs(id + '_1')) {
+      tone(1200, 0.06, 'square', 0.06);
+      if (e.k < 2) e.k++;
+      else e.done = true;
+    }
+    if (prs(id === 'P1' ? 'START1' : 'START2')) e.done = true;
+  }
+  if (time > S.nameEnd) for (const e of S.ent) e.done = true;
+  const blink = Math.floor(time / 180) % 2;
+  for (const e of S.ent) {
+    e.ch.forEach((t, i) => {
+      const cur = !e.done && i === e.k;
+      t.setText(CHARS[e.l[i]])
+        .setColor(e.done ? '#e1ff00' : cur ? (blink ? '#e1ff00' : '#5d6e12') : '#f7ffd8')
+        .setScale(cur ? 1.15 : 1);
+    });
+    if (e.done) e.hint.setText(TXT.ready);
+  }
+  if (S.ent.every((e) => e.done)) saveNames(time);
+}
+
+function saveNames(time) {
+  S.ph = 'over';
+  S.lock = time + 800;
+  S.idle = time + 20000;
+  const now = Date.now();
+  const add = S.ent.map((e, j) => ({ n: e.l.map((i) => CHARS[i]).join(''), s: e.p.score, h: e.p.maxH, d: now + j }));
+  for (const e of S.ent) for (const o of [e.lab, ...e.ch, e.hint]) o.destroy();
+  S.ent = [];
+  S.mark = add.map((a) => a.d);
+  TOP = cleanTop(TOP.concat(add)); // se muestra al tiro; luego se confirma con lo guardado
+  showTop(TXT.saving);
+  sc.goStart.setText(TXT.again);
+  tone(660, 0.3, 'triangle', 0.1, 1320);
+  saveTop(add).then((r) => {
+    TOP = r.top;
+    if (S.ph === 'over') showTop(r.ok ? TXT.saved : TXT.local);
+  });
+}
+
+function showTop(status) {
+  sc.goTop.setText(`TOP 10${status ? '   ' + status : ''}\n${topLines(S.mark)}`);
 }
 
 // ---------- sonido ----------
